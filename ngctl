@@ -1,0 +1,2383 @@
+#!/bin/bash
+
+# First things first. Do we want debug?
+st_debug=0
+
+echo "$@" | grep "\-\-debug=1" &> /dev/null
+if [ $? -eq 0 ]; then
+    st_debug=1
+fi
+
+echo "$@" | grep "\-\-debug=2" &> /dev/null
+if [ $? -eq 0 ]; then
+    st_debug=2
+fi
+
+# Some important stuff - set these to match your environment
+env_livestatus='/var/spool/nagios/cmd/live'         # live status socket for LQL queries
+env_cmdpipe='/var/log/nagios/rw/nagios.cmd'         # nagios command pipe
+env_server_prefix_regex='prod|dr|fake'             # valid prefixes for server names
+ngq_filename=/etc/nagios/ngctlq.conf                # config file name for query mode
+
+
+# For development purposes set this.  Functions that require interaction with a functioning
+# Nagios server will instead return fake data.
+#   Set to 0 = don't fake data
+#   Set to 1 = return a successful response
+#   Set to 2 = return an unsuccessful response
+
+devMode=0
+
+echo "$@" | grep "\-\-devMode=1" &> /dev/null
+if [ $? -eq 0 ]; then
+    devMode=1
+fi
+
+echo "$@" | grep "\-\-devMode=2" &> /dev/null
+if [ $? -eq 0 ]; then
+    devMode=2
+fi
+
+# Some console colour codes
+    # Foreground colours
+    fg_red="\e[31m\e[1m"
+    fg_green="\e[32m"
+    fg_yellow="\e[33m"
+    fg_blue="\e[36m"
+    fg_purple="\e[95m"
+
+    # Background colours
+    bg_red="\e[41m"
+    bg_green="\e[42m"
+    bg_yellow="\e[43m"
+    bg_blue="\e[46m"
+    bg_purple="\e[105m"
+    bg_grey="\e[100m"
+
+    # Other formatting
+    fg_bold="\e[1m"
+    fg_reverse="\e[7m"
+    fg_underline="\e[4m"
+
+    # Console resets
+    fg_reset="\e[39m"
+    bg_reset="\e[49m"
+    fbg_reset="\e[0m"
+
+
+# Instead of 'echo'ing everything, use a custom function to format output
+out (){
+    case "$1" in
+        info)
+            printf "$fg_blue$2$fbg_reset"
+            ;;
+        INFO)
+            printf "$bg_blue$2$fbg_reset"
+            ;;
+        ok)
+            printf "$fg_green$2$fbg_reset"
+            ;;
+        OK)
+            printf "$bg_green$2$fbg_reset"
+            ;;
+        debug)
+            if [ $st_debug -gt 0 ] || [ $st_debug -eq 2 ];then
+                printf "$bg_grey";echo -e "$@$fbg_reset"
+                return 0
+            fi
+            ;;
+        DEBUG)
+            if [ $st_debug -eq 2 ];then
+                printf "$fg_bold$bg_grey";echo -e "$@$fbg_reset"
+                return 0
+            fi
+            ;;            
+        hint)
+            printf "\t$fg_purple""Hint:\t$2$fbg_reset"
+            ;;
+        HINT)
+            printf "\t$bg_purple""Hint:\t$2$fbg_reset"
+            ;;             
+        err)
+            printf "$fg_red$2$fbg_reset\n" > /dev/stderr
+            return 1
+            ;;
+        ERR)
+            printf "$bg_red$2$fbg_reset\n" > /dev/stderr
+            return 1
+            ;;
+    esac
+}
+
+
+#  Find which mode we are working in
+case "$1" in 
+    down)
+        ng_mode=down
+        out debug "We are in downtime mode"
+        ;;
+
+    ack)
+        ng_mode=ack
+        out debug "We are in acknowledge mode"
+        ;;
+
+    query)
+        ng_mode=query
+        out debug "We are in query mode"
+        ;;
+    
+    up)
+        ng_mode=up
+        out debug "We are in up mode"
+        ;;
+    
+    enable-checks|ec)
+        ng_mode=encheck
+        out debug "We are in enable-check mode"
+        ;;
+
+    disable-checks|dc)
+            ng_mode=discheck
+            out debug "We are in disable-check mode"
+            ;;
+
+    enable-notifcations|en)
+            ng_mode=ennotif
+            out debug "We are in enable-notifications mode"
+            ;;
+
+    disable-notifications|dn)
+            ng_mode=disnotif
+            out debug "We are in disable-notifications mode"
+            ;;        
+
+    *)
+        ng_mode=down
+        out debug "We are defaulting to downtime mode as no recognised mode specified as first parameter"
+        ;;
+
+esac
+
+out DEBUG "Lots of debug enabled!"
+out debug "Got parameters: $@"
+
+
+# Set all "value provided" flags to 0; these are set when they are detected but not yet validated
+#                          Used for reporting errors back to the user (close but no cigar)
+#                          Still not implmented for help. If not used throughout may remove later.
+fnd_hostname=0
+fnd_hosttemplate=0
+fnd_hostgroup=0
+fnd_service=0
+fnd_minutes=0
+fnd_hours=0
+fnd_comment=0
+fnd_begintime=0
+fnd_endtime=0
+fnd_rangex=0
+fnd_rangey=0
+fnd_parity=0
+fnd_query=0
+fnd_filter=0
+fnd_field=0
+fnd_sleepz=0
+fnd_sleepZ=0
+fnd_query_name=0
+fnd_state=0
+fnd_username=0
+fnd_custom=0
+fnd_retry=0
+fnd_validation_retry=0
+fnd_config_filename=0
+fnd_sticky=0
+fnd_notify=0
+
+# Set all "value set" flags to 0; these are set when valid values have been found
+# When set, we use binary decimals for some so we can do easier checking later
+flg_hostname=0          # 1 when set
+flg_hosttemplate=0      # 2 when set
+flg_hostgroup=0         # 4 when set
+flg_service=0           # 1 when set
+flg_minutes=0           # 1 when set
+flg_hours=0             # 2 when set
+flg_begintime=0         # 4 when set
+flg_endtime=0           # 8 when set
+flg_rangex=0            # 1 when set
+flg_rangey=0            # 2 when set
+flg_parity=0            # 4 when set
+flg_comment=0           # 1 when set
+flg_filter=0            # 1 when set
+flg_field=0             # 1 when set
+flg_sleepz=0            # 1 when set
+flg_sleepZ=0            # 1 when set
+flg_query_name=0        # 1 when set
+flg_config_filename=0   # 1 when set
+flg_state=0             # 1 when set
+flg_username=0          # 1 when set
+flg_custom=0            # 1 when set
+flg_retry=0             # 1 when set
+flg_validation_retry=0  # 1 when set
+flg_error=0             # not a parameter, but we need it later
+
+# These are set to 1 when detected as they take no value - they're there or they're not
+flg_verbose=0
+flg_veryverbose=0
+flg_test=0
+flg_quiet=0
+flg_help=0
+flg_fullhelp=0
+flg_override=0
+flg_list=0
+flg_validate=0
+flg_sticky=0
+flg_notify=0
+
+
+# Initialise some misc variables
+ng_error="\nValidation error(s)"
+ng_hosttemplates=''
+ng_hostnames=''
+ng_services=''
+ng_custom=''
+ng_username=''
+ng_sleepz=0.5
+ng_sleepZ=0.1
+ng_retry=5
+ng_validation_retry=3
+ng_command_minimum=0.0005   # 0.5ms minimum to execute and validate assuming no retries and no sleep times
+                            # this is used by the schedule() function which attempts to calculate execution time
+                            # This is for you Craig, and your crazy bash expansions. See -r -R -z -Z for tuning
+                            # and use -t and -V
+ng_debughacks=0         # this will be set to 1 if debughacks.inc is present
+
+cmd_endtime=0           # the calculated end time
+cmd_starttime=0         # the calculated start time
+cmd_targets=''          # final list of host targets
+cmd_services=''         # final list of services
+comb_target=0           # 1 once valid target combination is found
+comb_time=0             # 1 once valid times are found
+comb_range=0            # 1 once valid range is found
+func_time=0             # used by datefunc() to return it's value
+hostgroup_hosts=''      # used by getHostsbyhostgroup() to set the list of hostnames
+
+
+# Some functions we need for various things
+# We're only using functions where it doesn't obfuscate the flow too much, and provides an advantage in not replicating code;
+# it should still be readable either immediately or having looked at the function once.
+
+# For example:  dedupe $array
+# hopefully indicates that the 'dedupe' function with remove duplicates from an array
+
+
+
+# htype() takes a string which is checked to see if it is a valid hostname or hostname template, or why it's invalid
+htype () {
+    
+    # Inputs:
+    #   $1 string to be tested
+
+    # Return codes: (no idea why I picked these, should probably review)
+    #   1   string is a hostname
+    #   2   string is a hostname template
+    #   99  string doesn't match prefix constraint
+    #   100 string ends in a single number (not allowed)
+    #   101 string contains inavlid characters for a hostname
+
+    prefixregex=$env_server_prefix_regex
+    testhost=$1
+
+    # Check the testhost contains only allowed characters
+    checkhost=$(echo $testhost | grep -Po "[A-Za-z0-9-]{1,}") 2>/dev/null
+    if [ "$testhost" != "$checkhost" ]; then
+        return 101
+        break
+    fi
+
+    # Check that the testhost begins with a valid prefix
+    echo $testhost | grep -Po "^($prefixregex)" &> /dev/null
+    if [ $? -eq 1 ]; then
+        return 99
+        break
+    fi
+
+    # Check if testhost ends with 2 or 3 numbers - it's a hostname if so
+    echo $testhost | grep -Po "\d{2,3}$" &>/dev/null
+    if [ $? -eq 0 ]; then
+        return 1
+        break
+    else
+        # Lastly check if it ends in a single number (not allowed)
+        echo $testhost | grep -Po "\d{1}$" &>/dev/null
+        if [ $? -eq 0 ]; then
+             return 100
+             break;
+        fi
+        # If we're here it ought to fit hostname template
+        return 2
+        break
+    fi
+}
+
+# isin() takes a string and a string of space delimited strings
+            # I'll rewrite some of this to use 'proper' arrays
+isin (){
+
+    # Inputs:
+    #   $1      String to find
+    #   $2      Quoted space delimited string of strings
+
+    # Return codes:
+    #   0       String was found
+    #   1       String was not found
+
+    if [ $# -lt 2 ]; then
+        return 99
+    fi
+    str_in=$1
+    str_array=$2
+
+    for i in $str_array; do
+        if [ "$i" == $str_in ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# dedupe() removes duplicate items from a list
+dedupe () {
+
+    # Inputs:
+    # $1 String of space delimted values
+
+    # Ouputs:
+    # $dedupe_result is set to depuded space delimted string
+
+    # Return codes:
+    # 0 no duplicates found 
+    # x number of duplicates removed
+
+    dedupe_result=''
+    dedupe_found=0
+
+    out DEBUG "dedupe() starting with $@"
+
+    for item in $@;
+    do
+        isin $item "$dedupe_result"
+        isin_result=$?
+        if [ $isin_result -eq 1 ]; then 
+            if [ ${#dedupe_result} -gt 0 ]; then
+                dedupe_result="$dedupe_result $item"
+            else
+                dedupe_result="$item"
+            fi
+        else
+            dedupe_found=$(($dedupe_found + 1))
+            out DEBUG removed duplicate $item
+        fi
+    done
+    return $dedupe_found
+}
+
+# datefunc() takes an an action type and value
+datefunc () {
+
+    # Inputs:
+    #   $1      type of request - hours or minutes output a value in seconds, absolute and now output unix timestamps
+    #   $2      value to work on, either an integer or string to be converted. None for 'now'
+
+    # Return coes:
+    #   0       func_time has been set
+    #   1       func_time has not been set - request failed
+
+    if [ "$1" == "hours" ]; then
+        func_time=$(($2 * 60 * 60))
+        return $?
+    elif [ "$1" == "minutes" ]; then
+        func_time=$(($2 * 60))
+        return $?
+    elif [ "$1" == "absolute" ]; then
+        func_time=$(date -d "$2" +%s)
+        return $?
+    elif [ "$1" == "now" ]; then
+        func_time=$(date +%s)
+        return $?
+    elif [ "$1" == "unix" ]; then
+        func_time=$(date -d @$2)
+        return $?
+    fi
+    return 1
+}
+
+getHostsbygroup (){
+
+    # Inputs:
+    # $1 hostgroup name
+
+    # Return codes:
+    # 0 hostnames found and added to $hostgroup_hosts
+    # 1 no hostnames found, invalid hostgroup
+    out DEBUG "Getting list of hosts in hostgroup in mode $devMode"
+
+    hostgroup_hosts=''    # Turns out this is important ;)
+
+    if [ $devMode -eq 0 ]; then
+        lql="GET hostsbygroup\nFilter: hostgroup_name = $1\nColumns: name\n"
+        lql_result=$(echo -e "$lql" | unixcat $env_livestatus)
+    elif [ $devMode -eq 1 ]; then
+        out DEBUG "Returning fake successful data from getHostsbygroup($1)"
+        lql_result=''
+        i=1
+        end=$(echo ${RANDOM:0:1})
+        while [ $i -le $end ]; do 
+            rnd=$(echo ${RANDOM:0:2})
+            out DEBUG "Generated hostname fakehost$1$rnd"
+            lql_result="$lql_result fakehost$1$rnd"
+            i=$(($i+1))
+        done
+    else
+        lql_result=''
+    fi
+
+    if [ ${#lql_result} -gt 0 ]; then
+        for hg_host in $lql_result; do
+            if [ ${#hostgroup_hosts} -gt 0 ]; then
+                isin $hg_host "$hostgroup_hosts"
+                dupcheck=$?
+                out DEBUG "isin() returned $dupcheck" 
+                if [ $dupcheck -eq 1 ]; then
+                    out DEBUG "Adding $hg_host to hostgroup_hosts"
+                    hostgroup_hosts="$hostgroup_hosts $hg_host"
+                else
+                    out DEBUG "Ignoring duplicate hostname $hg_host"
+                fi
+            else
+                out DEBUG "Adding $hg_host to hostgroup_hosts"
+                hostgroup_hosts=$hg_host
+            fi
+        done
+        return 0
+    else
+        ng_error="$ng_error\n\tNo hosts found for hostgroup $1"
+        flg_error=1
+        return 1
+    fi
+}
+
+# showHelp() does just that
+
+        ###  This really needs updating  ###
+
+showHelp (){
+    echo -e "$fg_bold$fg_underline$fg_green""ngctl help$fbg_reset"
+    echo -e ""
+    echo -e "Setting a downtime requires one or more hostnames, a start time, an end time, a comment and optionally one or more service names"
+    #echo -e ""
+    #echo -e "$fg_bold$fg_blue""parameters:$fbg_reset"
+    echo -e ""
+    echo -e "$fg_blue$fg_underline$fg_bold""Specify one or more hostnames$fbg_reset"
+    echo -e ""
+    echo -e "    $fg_bold""Either$fbg_reset"
+    echo -e "    -h      a hostname or a quoted space delimited list of hostnames. Can be specified multiple times. Can be specified along with -H"
+    echo -e "    -H      a hostgroup name or a quoted space delimited list of hostgroup names. Can be specified multiple times. Can be specified along with -h "
+    echo -e ""
+    echo -e "    $fg_bold""Or$fbg_reset"
+    echo -e "    -h      a valid hostname without the 2-3 digit suffix to be used as a template, requires a range (see -x -y -p)"
+    echo -e "    -p      parity used when -h has specified a hostname as a template. Optional, either odd or even "
+    echo -e "    -x      start of range used when -h has specified a hostname as a template"
+    echo -e "    -y      end of range used when -h has specified a hostname as a template"
+    echo -e ""
+    echo -e "$fg_blue$fg_underline$fg_bold""Start and end times$fbg_reset"
+    echo -e ""
+    echo -e "    -b      optional begin time, GNU 'date' compatible string. $fg_bold$fg_underline""If not specified \"now\" will be assumed$fbg_reset"
+    echo -e "    -e      end time, GNU 'date' compatible string, can't be used with -d or -D "
+    echo -e "    -d      duration in minutes, can't be used with -e "
+    echo -e "    -D      duration in hours, can't be used with -e "
+    echo -e ""
+    echo -e "$fg_blue$fg_underline$fg_bold""Specify one or more services (optional)$fbg_reset"
+    echo -e ""
+    echo -e "    -s      a service name or a quoted space delimited list of service names, can be specified multiple times"
+    echo -e "            $fg_bold""When specified the service will be downtimed NOT the host$fbg_reset"
+    echo -e ""
+    echo -e "$fg_blue$fg_underline$fg_bold""Specify the comment$fbg_reset"
+    echo -e ""
+    echo -e "    -c      comment, quoted string at least 10 characters"
+    echo -e ""
+    echo -e "$fg_blue$fg_underline$fg_bold""Other parameters$fbg_reset"
+    echo -e ""
+    echo -e "    -q      quiet - only output ID of downtime. Outputs -1 if not found or failed"
+    echo -e "    -t      test - do everything apart from send command"
+    echo -e "    -v      verbose - output the commands sent"
+    echo -e "    -V      very verbose - as -v but also explain parameter interpretation"
+    echo -e "    -z      sleep time in seconds between sending commands - default 0"
+    echo -e "    -Z      sleep time in seconds before verifying - default 5"
+    echo -e ""
+    echo -e "    --help  display extended help for mode - defaults to mode downtime"
+    echo -e "    --debug display debug info - values 1 (normal) or 2 (extended), default 0"
+    echo -e ""
+
+    if [ $st_debug -gt 0 ]; then
+        echo -e "    --devMode=1   Won't try and interact with Live Status, but will generate succsessful fake data for -H"
+        echo -e "    --devMode=2   Won't try and interact with Live Status, but will generate failed fake data for -H"
+        echo -e "                  If you're wanting to add functionality, consider generating fake data as an option of your function"
+        echo -e "                  as it makes it easier to develop without access to a live nagios/CheckMK setup"
+        echo -e ""
+        echo -e "                  Also please make use of 'out debug' and 'out DEBUG' for troubleshooting"
+    fi
+    echo -e "$fg_yellow""Note: duplicate hostnames and/or service names are discarded ('-h=prodserver01 -H=prodservers' matches 'prodserver01' once) $fbg_reset"
+    echo -e "$fg_yellow""Note: currently it is assumed all hostnames adhere to a set prefix ($env_server_prefix_regex) and 2-3 digits suffix  (eg. prodsomething01, drotherthing22)$fbg_reset"
+}
+
+# End of functions
+
+# Now we need to get all the command line parameters.  To match them we use a 'if ... fi' rather than a 'case ... esac' as 
+# we're looking for different length prefixes (and it's easier, I think).  We also need to support different rules for various parameters.  
+# This takes quite a lot of scripting compared to using 'getopts'.
+
+# First get switches which need no value
+sw_count=$#
+if [ $st_debug -gt 0 ]; then
+    out DEBUG "Found $sw_count parameters in total"
+fi
+
+for switch in "$@"
+do
+    if [ "${switch}" == "--help" ]; then
+        out DEBUG "Found --help"
+        out DEBUG "Showing help then quitting"
+        showHelp
+        exit 0
+
+    elif [ "${switch}" == "-v" ]; then
+        flg_verbose=1
+        out DEBUG "Found -v"
+
+    elif [ "${switch}" == "-V" ]; then
+        flg_veryverbose=1
+        out DEBUG "Found -V"
+
+    elif [ "${switch}" == "-t" ]; then
+        flg_test=1
+        out DEBUG "Found -t"
+    
+    elif [ "${switch}" == "-q" ]; then
+        flg_quiet=1
+        out DEBUG "Found -q"
+
+    elif [ "${switch}" == "--help" ]; then
+        flg_fullhelp=1
+        out DEBUG "Found --help"
+
+    elif [ "${switch}" == "-o" ]; then
+        flg_override=1
+        out DEBUG "Found -o"
+
+    elif [ "${switch}" == "-k" ]; then
+        flg_sticky=1
+        out DEBUG "Found -k"
+    
+    elif [ "${switch}" == "-n" ]; then
+        flg_notify=1
+        out DEBUG "Found -n"
+
+    elif [ "${switch}" == "--list" ]; then
+        flg_list=1
+        out DEBUG "Found --list"
+
+    elif [ "${switch}" == "--validate" ]; then
+        flg_validate=1
+        out DEBUG "Found --validate"
+
+# Now we'll get the rest of the options, validating as we go
+
+    elif [ "${switch:0:2}" == "-c" ]; then
+        fnd_comment=1
+        if [ $flg_comment -eq 1 ]; then
+            out DEBUG "Found and ignoring another -c"
+        else
+            flg_comment=1
+            ng_comment=${switch:3}
+            out DEBUG "Found -c with value '$ng_comment'"
+        fi
+
+    elif [ "${switch:0:2}" == "-b" ]; then
+        fnd_begintime=1
+        if [ $flg_begintime -eq 1 ]; then
+            out DEBUG "Found and ignoring another -b"
+        else
+            out DEBUG "Found -b with value '${switch:3}'"
+            date -d "${switch:3}" &> /dev/null
+            if [ $? -eq 0 ]; then
+                flg_begintime=4
+                ng_begintime=${switch:3}
+            else
+                flg_begintime=0
+                ng_begintime=''
+                ng_error="$ng_error\n\t'${switch:3}' is not a valid date / time"
+                flg_error=1
+            fi
+        fi
+
+    elif [ "${switch:0:2}" == "-e" ]; then
+        fnd_endtime=1
+        if [ $flg_endtime -eq 1 ]; then
+            out DEBUG "Found and ignoring another -e"
+        else
+            out DEBUG "Found -e with value '${switch:3}'"
+            date -d "${switch:3}" &> /dev/null
+            if [ $? -eq 0 ]; then
+                flg_endtime=8
+                ng_endtime=${switch:3}
+            else
+                flg_endtime=0
+                ng_endtime=''
+                ng_error="$ng_error\n\t'${switch:3}' is not a valid date / time"
+                flg_error=1
+            fi
+        fi
+
+    elif [ "${switch:0:2}" == "-d" ]; then
+        fnd_minutes=1
+        out DEBUG "Found -d with value '${switch:3}'"
+        dcheck=${switch:3}
+
+        if [ ${#ng_minutes} -eq 0 ]; then
+            echo ${switch:3} | grep -Po "\d{1,2}$" &> /dev/null
+            if [ $? -eq 0 ]; then
+                if [ ${#dcheck} -gt 2 ]; then
+                    ng_error="$ng_error\n\tInvalid value '${switch:3}' for -d"
+                else
+                    out DEBUG "Adding ${switch:3} minutes"
+                    ng_minutes="${switch:3}"
+                    flg_minutes=1
+                fi
+            else
+                ng_error="$ng_error\n\tInvalid value '${switch:3}' for -d"
+                flg_error=1
+            fi
+        else
+            out DEBUG "Found and ignoring another -d"
+
+        fi
+
+    elif [ "${switch:0:2}" == "-D" ]; then
+        fnd_hours=1
+        out DEBUG "Found -D with value '${switch:3}'"
+        dcheck=${switch:3}
+        if [ ${#ng_hours} -eq 0 ]; then
+            echo ${switch:3} | grep -P "\d{1,2}$" &> /dev/null
+            if [ $? -eq 0 ]; then
+                if [ ${#dcheck} -gt 2 ]; then
+                    ng_error="$ng_error\n\tInvalid value '${switch:3}' for -D"
+                    flg_error=1
+                else
+                    out DEBUG "Adding ${switch:3} hours"
+                    ng_hours="${switch:3}"
+                    flg_hours=2
+                fi
+            else
+                ng_error="$ng_error\n\tInvalid value '${switch:3}' for -D"
+                flg_error=1
+            fi
+        else
+            out DEBUG "Found and ignoring another -D"
+
+        fi
+
+    elif [ "${switch:0:2}" == "-h" ]; then
+        fnd_hostname=1
+        out DEBUG "Found -h with value '${switch:3}'"
+
+        for value in ${switch:3}; do
+
+            htype $value
+            returned_htype=$?
+            out DEBUG "htype returned $returned_htype"
+            if [ $returned_htype -eq 1 ] || [ $flg_override -eq 1 ]; then
+                out DEBUG "Type is hostname"
+                flg_hostname=1
+                if [ ${#ng_hostnames} -gt 0 ]; then
+                    isin $value "$ng_hostnames"
+                    dupcheck=$?
+                    out DEBUG "isin() returned $dupcheck" 
+                    if [ $dupcheck -eq 1 ]; then
+                        out DEBUG "Adding $value to hostnames"
+                        ng_hostnames="$ng_hostnames $value"
+                    else
+                        out DEBUG "Ignoring duplicate hostname $value"
+                    fi
+                else
+                    out DEBUG "Adding $value to hostnames (first found)"
+                    ng_hostnames=$value
+                fi
+            elif [ $returned_htype -eq 2 ] && [ $flg_override -eq 0 ]; then
+                out DEBUG "Type is host template"
+                fnd_hosttemplate=1
+                if [ $flg_hosttemplate -eq 2 ]; then
+                    out DEBUG "Found and ignoring another -h host template"
+                else
+                    flg_hosttemplate=2
+                    ng_hosttemplates=$value
+                fi
+            else
+                ng_error="$ng_error\n\tInvalid value of -h ($value) - code $returned_htype"
+                flg_error=1
+            fi
+
+        done
+        
+    elif [ "${switch:0:2}" == "-H" ]; then
+        fnd_hostgroup=1
+        out DEBUG "Found -H with value '${switch:3}'"
+        if [ ${#ng_hostgroups} -gt 0 ]; then
+            isin ${switch:3} "$ng_hostgroups"
+            dupcheck=$?
+            out DEBUG "isin() returned $dupcheck" 
+            if [ $dupcheck -eq 1 ]; then
+                out DEBUG "Adding ${switch:3} to hostgroups"
+                ng_hostgroups="$ng_hostgroups ${switch:3}"
+            else
+                out DEBUG "Ignoring duplicate hostgroup ${switch:3}"
+            fi
+        else
+            flg_hostgroup=4
+            out DEBUG "Adding ${switch:3} to hostgroups (first found)"
+            ng_hostgroups=${switch:3}
+        fi
+
+    elif [ "${switch:0:2}" == "-s" ]; then
+        fnd_service=1
+        out DEBUG "Found -s with value '${switch:3}'"
+        if [ ${#ng_services} -gt 0 ]; then
+            isin ${switch:3} "$ng_services"
+            dupcheck=$?
+            out DEBUG "isin() returned $dupcheck" 
+            if [ $dupcheck -eq 1 ]; then
+                out DEBUG "Adding ${switch:3} to services"
+                ng_services="$ng_services ${switch:3}"
+            else
+                out DEBUG "Ignoring duplicate service ${switch:3}"
+            fi
+        else
+            out DEBUG "Adding ${switch:3} to services"
+            ng_services=${switch:3}
+            flg_service=1
+        fi
+
+    elif [ "${switch:0:2}" == "-x" ]; then
+        fnd_rangex=1
+        out DEBUG "Found -x with value '${switch:3}'"
+        dcheck=${switch:3}
+        if [ ${#ng_rangex} -eq 0 ]; then
+            echo ${switch:3} | grep -P "\d{1,2}$" &> /dev/null
+            if [ $? -eq 0 ]; then
+                if [ ${#dcheck} -gt 2 ]; then
+                    ng_error="$ng_error\n\tInvalid value '${switch:3}' for -x"
+                    flg_error=1
+                else
+                    out DEBUG "Adding ${switch:3} rangex"
+                    ng_rangex="${switch:3}"
+                    flg_rangex=1
+                fi
+            else
+                ng_error="$ng_error\n\tInvalid value '${switch:3}' for -x"
+                flg_error=1
+            fi
+        else
+            out DEBUG "Found and ignoring another -x"
+        fi
+    elif [ "${switch:0:2}" == "-y" ]; then
+        fnd_rangey=1
+        out DEBUG "Found -y with value '${switch:3}'"
+        dcheck=${switch:3}
+        if [ ${#ng_rangey} -eq 0 ]; then
+            echo ${switch:3} | grep -P "\d{1,2}$" &> /dev/null
+            if [ $? -eq 0 ]; then
+                if [ ${#dcheck} -gt 2 ]; then
+                    ng_error="$ng_error\n\tInvalid value '${switch:3}' for -y"
+                else
+                    out DEBUG "Adding ${switch:3} rangey"
+                    ng_rangey="${switch:3}"
+                    flg_rangey=2
+                fi
+            else
+                ng_error="$ng_error\n\tInvalid value '${switch:3}' for -y"
+            fi
+        else
+            out DEBUG "Found and ignoring another -y"
+        fi
+    elif [ "${switch:0:2}" == "-p" ]; then
+        fnd_parity=1
+        out DEBUG "Found -p with value '${switch:3}'"
+        dcheck=${switch:3}
+        if [ ${#ng_parity} -eq 0 ]; then
+            echo ${switch:3} | grep -P "(odd|even)$" &> /dev/null
+            if [ $? -eq 0 ]; then
+                out DEBUG "Adding ${switch:3} parity"
+                ng_parity="${switch:3}"
+                flg_parity=4
+            else
+                out err "Invalid value '${switch:3}' for -p"
+            fi
+        else
+            out DEBUG "Found and ignoring another -p"
+        fi
+    elif [ "${switch:0:2}" == "-z" ]; then
+        fnd_sleepz=1
+        out DEBUG "Found -z with value '${switch:3}'"
+        zcheck=${switch:3}
+        if [ $flg_sleepz -eq 0 ]; then
+            echo ${switch:3} | grep -P "\d{0,}.{0,}\d{0,}$" &> /dev/null
+            if [ $? -eq 0 ]; then
+                if [ ${#zcheck} -gt 10 ]; then
+                    ng_error="$ng_error\n\tInvalid length value '${switch:3}' for -z"
+                    flg_error=1
+                else
+                    out DEBUG "Adding ${switch:3} sleepz"
+                    ng_sleepz="${switch:3}"
+                    flg_sleepz=1
+                fi
+            else
+                ng_error="$ng_error\n\tInvalid value '${switch:3}' for -z - regex failed"
+                flg_error=1
+            fi
+        else
+            out DEBUG "Found and ignoring another -z"
+
+        fi
+    elif [ "${switch:0:2}" == "-Z" ]; then
+        fnd_sleepz=1
+        out DEBUG "Found -Z with value '${switch:3}'"
+        Zcheck=${switch:3}
+        if [ $flg_sleepZ -eq 0 ]; then
+            echo ${switch:3} | grep -P "\d{0,}.{0,}\d{0,}$" &> /dev/null
+            if [ $? -eq 0 ]; then
+                if [ ${#Zcheck} -gt 10 ]; then
+                    ng_error="$ng_error\n\tInvalid length value '${switch:3}' for -Z"
+                    flg_error=1
+                else
+                    out DEBUG "Adding ${switch:3} sleepZ"
+                    ng_sleepZ="${switch:3}"
+                    flg_sleepZ=1
+                fi
+            else
+                ng_error="$ng_error\n\tInvalid value '${switch:3}' for -Z"
+                flg_error=1
+            fi
+        else
+            out DEBUG "Found and ignoring another -Z"
+
+        fi
+    elif [ "${switch:0:2}" == "-r" ]; then
+        fnd_retry=1
+        out DEBUG "Found -r with value '${switch:3}'"
+        rcheck=${switch:3}
+        if [ $ng_retry -eq 2 ]; then
+            echo ${switch:3} | grep -P "\d{0,1}$" &> /dev/null
+            if [ $? -eq 0 ]; then
+                if [ ${#rcheck} -gt 10 ]; then
+                    ng_error="$ng_error\n\tInvalid length value '${switch:3}' for -r"
+                    flg_error=1
+                else
+                    out DEBUG "Adding ${switch:3} command retry"
+                    ng_retry="${switch:3}"
+                    flg_retry=1
+                fi
+            else
+                ng_error="$ng_error\n\tInvalid value '${switch:3}' for -r - regex failed"
+                flg_error=1
+            fi
+        else
+            out DEBUG "Found and ignoring another -r"
+
+        fi
+    elif [ "${switch:0:2}" == "-R" ]; then
+        fnd_validation_retry=1
+        out DEBUG "Found -R with value '${switch:3}'"
+        Rcheck=${switch:3}
+        if [ $ng_validation_retry -eq 10 ]; then
+            echo ${switch:3} | grep -P "\d{0,1}$" &> /dev/null
+            if [ $? -eq 0 ]; then
+                if [ ${#Rcheck} -gt 10 ]; then
+                    ng_error="$ng_error\n\tInvalid length value '${switch:3}' for -R"
+                    flg_error=1
+                else
+                    out DEBUG "Adding ${switch:3} validation retry"
+                    ng_validation_retry="${switch:3}"
+                    flg_validation_retry=1
+                fi
+            else
+                ng_error="$ng_error\n\tInvalid value '${switch:3}' for -R - regex failed"
+                flg_error=1
+            fi
+        else
+            out DEBUG "Found and ignoring another -R"
+
+        fi
+
+    elif [ "${switch:0:2}" == "-S" ]; then
+        fnd_state=1
+        if [ $flg_state -eq 1 ]; then
+            out DEBUG "Found and ignoring another -S"
+        else
+            flg_state=1
+            ng_state=${switch:3}
+            out DEBUG "Found -S with value '$ng_state'"
+        fi
+
+# Query specific parameters
+
+    elif [ "${switch:0:2}" == "-Q" ]; then
+        fnd_query_name=1
+        if [ $flg_query_name -eq 1 ]; then
+            out DEBUG "Found and ignoring another -Q"
+        else
+            flg_query_name=1
+            ng_query_name=${switch:3}
+            out DEBUG "Found -Q with value '$ng_query_name'"
+        fi
+
+    elif [ "${switch:0:8}" == "--config" ]; then
+        fnd_config_filename=1
+        if [ $flg_config_filename -eq 1 ]; then
+            out DEBUG "Found and ignoring another --config"
+        else
+            flg_config_filename=1
+            ng_config_filename=${switch:9}
+            out DEBUG "Found --config with value '$ng_config_filename'"
+        fi
+
+    elif [ "${switch:0:8}" == "--custom" ]; then
+        fnd_custom=1
+        if [ $flg_custom -eq 1 ]; then
+            out DEBUG "Found and ignoring another --custom"
+        else
+            flg_custom=1
+            ng_custom=(${switch:9})
+            out DEBUG "Found --custom with value '${ng_custom[@]}'"
+            out DEBUG "Found --custom with ${#ng_custom[@]} values"
+        fi
+
+    elif [ "${switch:0:2}" == "-u" ]; then
+        fnd_username=1
+        if [ $flg_username -eq 1 ]; then
+            out DEBUG "Found and ignoring another -u"
+        else
+            flg_username=1
+            ng_username=${switch:3}
+            out DEBUG "Found -u with value '$ng_username'"
+        fi
+
+
+    elif [ "$switch" == "down" ] || [ "$switch" == "ack" ] || [ "$switch" == "up" ] || [ "$switch" == "query" ]; then
+        ng_mode=$switch
+        # I think this is duplicating a much earlier check ^^^^  should probably merge with the following
+
+    elif [ "$switch" == "--debug=1" ] || [ "$switch" == "--debug=2" ] || [ "$switch" == "--debug=0" ] || 
+         [ "$switch" == "--devMode=1" ] || [ "$switch" == "--devMode=2" ] || 
+         [ "$switch" == "dc" ] || [ "$switch" == "ec" ] || [ "$switch" == "dn" ] || [ "$switch" == "en" ] ||
+         [ "$switch" == "disable-checks" ] || [ "$switch" == "enable-checks" ] || [ "$switch" == "disable-notifications" ] || [ "$switch" == "enable-notifications" ]
+         then
+        echo "Catch-all for ok" &> /dev/null
+
+    else
+        out err "Ignoring unknown parameter $switch"
+    fi
+
+done
+
+if [ -r ./devkit/debughacks.inc ]; then
+    source ./devkit/debughacks.inc
+fi
+
+out debug "Parmameter processing done"
+out debug "Checking access to Livestatus pipe and socket"
+
+# dev note - docker image has pipe and socket at /opt/omd/sites/mva/tmp/run
+# Let's make sure that we can write to both the Livestatus socket and the command pipe
+err_fatal=0
+if [ -p $env_cmdpipe ]; then
+    out DEBUG "Command pipe '$env_cmdpipe' exists âœ“"
+    if [ -w $env_cmdpipe ]; then
+        out DEBUG "We can write to the command pipe âœ“"
+    else
+        out ERR "Unable to write to command pipe '$env_cmdpipe' âœ—"
+        err_fatal=1
+    fi
+else
+    out ERR "Command pipe '$env_cmdpipe' doesn't exist âœ—"    
+    err_fatal=1
+fi
+
+if [ -S $env_livestatus ]; then
+    out DEBUG "Livestatus socket '$env_livestatus' exists âœ“"
+    if [ -w $env_livestatus ]; then
+        out DEBUG "We can write to the Livestatus socket âœ“"
+    else
+        out ERR "Unable to write to Livestatus socket '$env_livestatus' âœ—"
+        err_fatal=1
+    fi
+else
+    out ERR "Livestatus socket '$env_livestatus' doesn't exist âœ—"    
+    err_fatal=1
+fi
+
+if [ $err_fatal -eq 1 ]; then 
+    if [ $flg_test -eq 1 ] || [ $devMode -ge 1 ]; then
+        out info "Ignoring pipe/socket error(s) in devMode or with -t (running this for real would have failed!)\n"
+    else
+        out ERR "Failed access checks âœ—"
+        exit 5
+    fi
+fi
+
+out debug "------------------------------------------------------"
+out debug "hostnames           [$ng_hostnames]"
+out debug "hosttemplates       [$ng_hosttemplates]"
+out debug "hostgroups          [$ng_hostgroups]"
+out debug "services            [$ng_services]"
+out debug "begin time          [$ng_begintime]"
+out debug "end time            [$ng_endtime]"
+out debug "minutes             [$ng_minutes]"
+out debug "hours               [$ng_hours]"
+out debug "comment             [$ng_comment]"
+out debug "rangex              [$ng_rangex]"
+out debug "rangey              [$ng_rangey]"
+out debug "parity              [$ng_parity]"
+out debug "filters             [$ng_filters]"
+out debug "query name          [$ng_query_name]"
+out debug "state               [$ng_state]"
+out debug "config              [$ng_config_filename]"
+out debug "custom values       [${ng_custom[@]}]"
+out debug "throttle            [$ng_sleepz]"
+out debug "validation pause    [$ng_sleepZ]"
+out debug "command retries     [$ng_retry]"
+out debug "validation retries  [$ng_validation_retry]"
+out debug "Switches:"
+out debug "-o override         [$flg_override]"
+out debug "-t test             [$flg_test]"
+out debug "-k sticky           [$flg_sticky]"
+out debug "-n notify           [$flg_notify]"
+out debug "-v verbose          [$flg_verbose]"
+out debug "-V very verbose     [$flg_veryverbose]"
+out debug "-q quiet            [$flg_quiet]"
+out debug "--list queries      [$flg_list]"
+out debug "--validate config   [$flg_validate]"
+out debug "------------------------------------------------------"
+
+#if [ $flg_verbose -eq 1 ]; then echo "Got parameters: $@";fi
+
+# Time to do some error checking
+# Lets add up the various groups - we can then quickly check what's valid
+# This is why we set the "found" values to 1, 2, 4, 8 etc
+
+errchk_times=$(($flg_minutes + $flg_hours + $flg_begintime + $flg_endtime))
+errchk_targets=$(($flg_hostname + $flg_hosttemplate + $flg_hostgroup))
+errchk_range=$(($flg_rangex + $flg_rangey + $flg_parity))
+
+out debug "Target value     $errchk_targets"
+out debug "Times value      $errchk_times"
+out debug "Range value      $errchk_range"
+
+# We'll need targets for all modes, so let's start there
+out debug "Checking for errors - host targets"
+
+# Values for $errchk_targets (4 valid)
+# 1 - one or more hostnames                                         5 - hostname and one or more hostgroups
+# 2 - one host template                                             6 - INVALID: one or more hostgroups and host template specified
+# 3 - INVALID: hostname and host template specified                 7 - INVALID: one or more hostnames, hostgroups and host template specified
+# 4 - one or more hostgroups 
+
+case "$errchk_targets" in
+    0)
+        if [ $ng_mode == down ]; then
+            ng_error="$ng_error\n\tNo hostnames, hostgroups or host template specified"
+            flg_error=1
+        fi
+        ;;
+
+    3)
+        ng_error="$ng_error\n\tOne or more hostnames as well as host template specified"
+        flg_error=1
+        ;;
+
+    6)
+        ng_error="$ng_error\n\tHost template specified as well as one or more hostgroups"
+        flg_error=1
+        ;;
+
+    7)
+        ng_error="$ng_error\n\tHost template specified as well as one or more hostnames and hostgroups"
+        flg_error=1
+        ;;
+
+    *)
+        echo "Catch-all for ok" &> /dev/null
+        comb_target=1
+
+esac
+
+# First we'll do some extensive checking of times for 'down' mode
+
+if [ $ng_mode == down ]; then
+
+    # Values for $errchk_times (8 valid):
+    # 1 - just minutes, assume start now                                9 -  INVALID: end time and minutes
+    # 2 - just hours, assume start now                                  10 - INVALID: end time and hours
+    # 3 - minutes and hours, assume start now                           11 - INVALID: end time, minutes and hours
+    # 4 - INVALID: begin time only - can't set an end time              12 - begin time and end time - future time frame
+    # 5 - minutes and a begin time - future time frame                  13 - INVALID: end time, minutes and begin time
+    # 6 - hours and a begin time - future time frame                    14 - INVALID: end time, hours and begin time
+    # 7 - minutes, hours and a begin time - future time frame           15 - INVALID: end time, minutes, hours and begin time
+    # 8 - end time only, assume start now
+
+    case "$errchk_times" in
+        0)
+            ng_error="$ng_error\n\tNo valid time frame specified"
+            flg_error=1
+            ;;
+
+        4)
+            ng_error="$ng_error\n\tOnly begin time specified - cannot set and end time"
+            flg_error=1
+            ;;
+        
+        9)
+            ng_error="$ng_error\n\tEnd time and minutes specified - ambiguous"
+            flg_error=1
+            ;;
+        
+        10)
+            ng_error="$ng_error\n\tEnd time and hours specified - ambiguous"
+            flg_error=1
+            ;;
+        
+        11)
+            ng_error="$ng_error\n\tEnd time, minutes and hours specified - ambiguous"
+            flg_error=1
+            ;;
+        
+        13)
+            ng_error="$ng_error\n\tEnd time and minutes specified - ambiguous"
+            flg_error=1
+            ;;
+        
+        14)
+            ng_error="$ng_error\n\tEnd time and hours specified - ambiguous"
+            flg_error=1
+            ;;
+        
+        15)
+            ng_error="$ng_error\n\tEnd time, minutes and hours specified - ambiguous"
+            flg_error=1
+            ;;
+
+        *)
+            echo "Catch-all for ok" &> /dev/null
+    esac
+
+    # Now check that time frame specified is actually sane  (let's not try and end before we start!)
+    # We will create the start and end times that we will use later to do this check
+
+
+    case "$errchk_times" in
+        1)      # 1 - just minutes, assume start now
+                datefunc now
+                if [ $? -eq 0 ]; then 
+                    cmd_starttime=$func_time
+                else
+                    out ERR "Something has gone horribly wrong"; exit 1
+                fi
+                datefunc minutes $ng_minutes
+                if [ $? -eq 0 ]; then 
+                    cmd_endtime=$(($func_time + $cmd_starttime))
+                else
+                    out ERR "Something has gone horribly wrong"; exit 1
+                fi
+                # Check what we have is sane
+                if [ $cmd_starttime -gt $cmd_endtime ]; then
+                    out ERR "Start time is after end time"; exit 1
+                else
+                    comb_time=1
+                fi
+                ;;
+
+
+        2)      #2 - just hours, assume start now
+                datefunc now
+                if [ $? -eq 0 ]; then 
+                    cmd_starttime=$func_time
+                else
+                    out ERR "Something has gone horribly wrong"; exit 1
+                fi
+                datefunc hours $ng_hours
+                if [ $? -eq 0 ]; then 
+                    cmd_endtime=$(($func_time + $cmd_starttime))
+                else
+                    out ERR "Something has gone horribly wrong"; exit 1
+                fi
+                # Check what we have is sane
+                if [ $cmd_starttime -gt $cmd_endtime ]; then
+                    out ERR "Start time is after end time"; exit 1
+                else
+                    comb_time=1
+                fi
+                ;;        
+
+        3)      #3 - minutes and hours, assume start now
+                datefunc now
+                if [ $? -eq 0 ]; then 
+                    cmd_starttime=$func_time
+                else
+                    out ERR "Something has gone horribly wrong"; exit 1
+                fi
+                datefunc minutes $ng_minutes
+                if [ $? -eq 0 ]; then 
+                    cmd_endtime=$(($func_time + $cmd_starttime))
+                else
+                    out ERR "Something has gone horribly wrong"; exit 1
+                fi
+                datefunc hours $ng_hours
+                if [ $? -eq 0 ]; then 
+                    cmd_endtime=$(($func_time + $cmd_endtime))
+                else
+                    out ERR "Something has gone horribly wrong"; exit 1
+                fi
+                # Check what we have is sane
+                if [ $cmd_starttime -gt $cmd_endtime ]; then
+                    out ERR "Start time is after end time"; exit 1
+                else
+                    comb_time=1
+                fi
+                ;;
+
+        5)      #5 - minutes and a begin time - future time frame
+
+                datefunc absolute "$ng_begintime"
+                if [ $? -eq 0 ]; then 
+                    cmd_starttime=$func_time
+                else
+                    out ERR "Something has gone horribly wrong"; exit 1
+                fi
+                datefunc minutes $ng_minutes
+                if [ $? -eq 0 ]; then 
+                    cmd_endtime=$(($func_time + $cmd_starttime))
+                else
+                    out ERR "Something has gone horribly wrong"; exit 1
+                fi
+                # Check what we have is sane
+                if [ $cmd_starttime -gt $cmd_endtime ]; then
+                    out ERR "Start time is after end time"; exit 1
+                else
+                    comb_time=1
+                fi
+                ;;
+
+
+        6)      #6 - hours and a begin time - future time frame
+
+                datefunc absolute "$ng_begintime"
+                if [ $? -eq 0 ]; then 
+                    cmd_starttime=$func_time
+                else
+                    out ERR "Something has gone horribly wrong"; exit 1
+                fi
+                datefunc hours $ng_hours
+                if [ $? -eq 0 ]; then 
+                    cmd_endtime=$(($func_time + $cmd_starttime))
+                else
+                    out ERR "Something has gone horribly wrong"; exit 1
+                fi
+                # Check what we have is sane
+                if [ $cmd_starttime -gt $cmd_endtime ]; then
+                    out ERR "Start time is after end time"; exit 1
+                else
+                    comb_time=1
+                fi
+                ;;
+
+        7)      #7 - minutes, hours and a begin time - future time frame
+
+                    datefunc absolute "$ng_begintime"
+                if [ $? -eq 0 ]; then 
+                    cmd_starttime=$func_time
+                else
+                    out ERR "Something has gone horribly wrong"; exit 1
+                fi
+                datefunc minutes $ng_minutes
+                if [ $? -eq 0 ]; then 
+                    cmd_endtime=$(($func_time + $cmd_starttime))
+                else
+                    out ERR "Something has gone horribly wrong"; exit 1
+                fi
+                datefunc hours $ng_hours
+                if [ $? -eq 0 ]; then 
+                    cmd_endtime=$(($func_time + $cmd_endtime))
+                else
+                    out ERR "Something has gone horribly wrong"; exit 1
+                fi
+                # Check what we have is sane
+                if [ $cmd_starttime -gt $cmd_endtime ]; then
+                    out ERR "Start time is after end time"; exit 1
+                else
+                    comb_time=1
+                fi
+                ;;
+
+        8)      #8 - end time only, assume start now
+
+                datefunc now
+                if [ $? -eq 0 ]; then 
+                    cmd_starttime=$func_time
+                else
+                    out ERR "Something has gone horribly wrong"; exit 1
+                fi
+                datefunc absolute "$ng_endtime"
+                if [ $? -eq 0 ]; then 
+                    cmd_endtime=$func_time
+                else
+                    out ERR "Something has gone horribly wrong"; exit 1
+                fi
+                # Check what we have is sane
+                if [ $cmd_starttime -gt $cmd_endtime ]; then
+                    out ERR "Start time is after end time"; exit 1
+                else
+                    comb_time=1
+                fi
+                ;;
+
+        12)     #12 - begin time and end time - future time frame
+                datefunc absolute "$ng_begintime"
+                if [ $? -eq 0 ]; then 
+                    cmd_starttime=$func_time
+                else
+                    out ERR "Something has gone horribly wrong"; exit 1
+                fi
+                datefunc absolute "$ng_endtime"
+                if [ $? -eq 0 ]; then 
+                    cmd_endtime=$func_time
+                else
+                    out ERR "Something has gone horribly wrong"; exit 1
+                fi
+                # Check what we have is sane
+                if [ $cmd_starttime -gt $cmd_endtime ]; then
+                    out ERR "Start time is after end time"; exit 1
+                else
+                    comb_time=1
+                fi
+                ;;
+    esac
+                out debug "Start: $cmd_starttime   End: $cmd_endtime"
+                datefunc unix $cmd_starttime
+                out debug "Start: $func_time"
+                datefunc unix $cmd_endtime
+                out debug "End:   $func_time"
+
+    elif [ $ng_mode == query ]; then
+
+        out debug Checking times in query context
+
+        if [ $flg_begintime -gt 0 ]; then
+            datefunc absolute "$ng_begintime"
+            if [ $? -eq 0 ]; then 
+                cmd_starttime=$func_time
+            else
+                out ERR "Something has gone horribly wrong"; exit 1
+            fi
+        fi
+
+        if [ $fnd_endtime -gt 0 ]; then
+            datefunc absolute "$ng_endtime"
+            if [ $? -eq 0 ]; then 
+                cmd_endtime=$func_time
+            else
+                out ERR "Something has gone horribly wrong"; exit 1
+            fi
+        fi
+
+        if [ $fnd_hours -gt 0 ]; then
+            ng_error="$ng_error\n\tHours is not valid in query mode"
+            flg_error=1
+        fi
+
+        if [ $fnd_minutes -gt 0 ]; then
+            ng_error="$ng_error\n\tMinutes is not valid in query mode"
+            flg_error=1
+        fi
+
+        out debug "Start time if any is $cmd_starttime"
+        out debug "End time if any is $cmd_endtime"
+
+fi
+
+# Values for $errchk_range (2 valid)
+# 1 - INVALID: Only start of range specified                        5 - INVALID: Only start and parity of range specified
+# 2 - INVALID: Only end of range specified                          6 - INVALID: Only end and parity of range specified
+# 3 - Start and end of range specified                              7 - Start, end and parity of range specified
+# 4 - INVALID: Only parity of range specified 
+
+
+if [ $errchk_range -gt 0 ] && [ $errchk_targets -ne 2 ]; then
+    ng_error="$ng_error\n\tRange specified without host template, or hostname(s) and/or hostgroup(s) specified as well"
+    flg_error=1
+fi
+
+case "$errchk_range" in
+    0)
+        comb_range=0
+        ;;
+    1)
+        ng_error="$ng_error\n\tOnly start of range specified"
+        flg_error=1
+        ;;
+
+    2)
+        ng_error="$ng_error\n\tOnly end of range specified"
+        flg_error=1
+        ;;
+
+    4)
+        ng_error="$ng_error\n\tOnly parity of range specified"
+        flg_error=1
+        ;;
+
+    5)
+        ng_error="$ng_error\n\tOnly start and parity of range specified"
+        flg_error=1
+        ;;
+
+    6)
+        ng_error="$ng_error\n\tOnly end and parity of range specified"
+        flg_error=1
+        ;;
+
+    *)
+        echo "Catch-all for ok" &> /dev/null            #  This isn't handling no range specified
+        comb_range=1
+        ;;
+esac
+
+# Let create the range numbers as $ng_range if we've got a valid combination
+if [ $comb_range -eq 1 ]; then
+    if [ $ng_rangex -lt $ng_rangey ]; then
+        out DEBUG "Valid range parameter combination found"
+        # Is the first number odd or even?
+        rxp=$(($ng_rangex % 2))
+        if [ "$rxp" -ne "0" ]
+        then
+            ng_rangeXparity='odd'
+        else
+            ng_rangeXparity='even'
+        fi
+        out DEBUG "$ng_rangex is an $ng_rangeXparity number"
+
+        # Generate  the list based on the parity of x and the parity if specified
+        if [ $errchk_range -eq 3 ]; then
+            cmd_range=$(for r in `seq $ng_rangex $ng_rangey`; do printf %.2d $r;echo;done)
+        elif [ $errchk_range -eq 7 ]; then
+            if [ "$ng_rangeXparity" = "$ng_parity" ]; then
+                cmd_range=$(for r in `seq $ng_rangex 2 $ng_rangey`; do printf %.2d $r;echo;done)
+            else
+                ng_rangex=$(( $ng_rangex + 1 ))
+                cmd_range=$(for r in `seq $ng_rangex 2 $ng_rangey`; do printf %.2d $r;echo;done)
+            fi
+        else
+            out ERR "We should not be trying to set a range!"; exit 3
+        fi
+    else
+        ng_error="$ng_error\n\tRange start is greater than range end"
+        flg_error=1
+        comb_range=0
+    fi
+fi
+
+if [ $comb_target -eq 1 ]; then
+    # Target combinations are OK, and we've checked other generic parmaters. Lets build target list
+
+    if [ $errchk_targets -eq 1 ] || [ $errchk_targets -eq 4 ] || [ $errchk_targets -eq 5 ]; then
+
+        out DEBUG "Building target list from hostnames and/or hostgroups"
+        cmd_targets=$ng_hostnames
+        if [ ${#ng_hostgroups} -gt 0 ]; then
+            for group in $ng_hostgroups; do 
+                out DEBUG "Starting getHostsbygroup $group"
+                getHostsbygroup $group
+                out DEBUG "getHostsbtgroup returned: $hostgroup_hosts"
+                if [ ${#cmd_targets} -gt 0 ]; then
+                    cmd_targets="$cmd_targets $hostgroup_hosts"
+                else
+                    cmd_targets=$hostgroup_hosts
+                fi
+            done
+        fi
+        
+        # If we've got hostgroups involved, remove any duplicate hostnames from targets
+        if [ $errchk_targets -eq 4 ] || [ $errchk_targets -eq 5 ]; then
+            dedupe $cmd_targets
+            out DEBUG "Removed $? duplicate hostname(s)"
+            cmd_targets="$dedupe_result"
+
+        fi
+
+    elif [ $errchk_targets -eq 2 ] && [ $comb_range -eq 1 ]; then
+
+        out DEBUG "Building target list from host template and range"
+        cmd_targets=''
+        for number in $cmd_range
+        do
+            if [ ${#cmd_targets} -gt 0 ]; then
+                cmd_targets="$cmd_targets $ng_hosttemplates$number"
+            else
+                cmd_targets=$ng_hosttemplates$number
+            fi
+        done
+
+    else
+        flg_error=1
+        ng_error="$ng_error\n\tCan't build hostnames list from template without a valid range"
+    fi
+fi
+
+# Purley for consistency later, set some more variables; all the values in the command and validate
+# section should be prefixed with cmd_ to ensure we're using final values
+cmd_services=$ng_services
+cmd_comment=$ng_comment
+cmd_user=$USER
+cmd_retries=$ng_retry                       # number of times to try sending the command
+cmd_validate_retries=$ng_validation_retry   # number of times to try and validate after each command try
+cmd_sticky=$flg_sticky
+cmd_notify=$flg_notify
+cmd_persistent=1
+if [ $cmd_user == root ]; then
+    cmd_user=$SUDO_USER
+fi
+
+# That's the end of generic error checking - we'll output any errors after mode specific error checking
+out debug "Finished checking for generic errors"
+out debug "------------------------------------------------------"
+
+
+if [ "$ng_mode" != "query" ]; then      # this should cover all use cases (send and validate a command) 
+                                        # except queries which are handled seperately
+
+    # Mode specific error checking - all but query mode
+
+    # Do we have a comment? down and ack modes only
+    if [ "$ng_mode" == "down" ] || [ "$ng_mode" == "ack" ]; then
+        if [ $flg_comment -eq 0 ] ; then
+            flg_error=1
+            ng_error="$ng_error\n\tNo comment provided"
+        fi
+    fi
+
+    # Error if query mode specfic parameters have been specified
+    if [ $ng_mode != query ]; then
+
+        if [ $flg_config_filename -eq 1 ] ; then
+            flg_error=1
+            ng_error=$(echo -e "$ng_error\n\tConfig file is not valid in $ng_mode mode")
+        fi
+
+        if [ $flg_validate -eq 1 ] ; then
+            flg_error=1
+            ng_error=$(echo -e "$ng_error\n\tValidate is not valid in $ng_mode mode")
+        fi
+
+        if [ $flg_list -eq 1 ] ; then
+            flg_error=1
+            ng_error=$(echo -e "$ng_error\n\tList is not valid in $ng_mode mode")
+        fi
+
+        if [ $flg_query_name -eq 1 ] ; then
+            flg_error=1
+            ng_error=$(echo -e "$ng_error\n\tQuery name is not valid in $ng_mode mode")
+        fi
+
+        if [ $flg_state -eq 1 ] ; then
+            flg_error=1
+            ng_error=$(echo -e "$ng_error\n\tState is not valid in $ng_mode mode")
+        fi
+
+        if [ $flg_custom -eq 1 ] ; then
+            flg_error=1
+            ng_error=$(echo -e "$ng_error\n\tCustom values are not valid in $ng_mode mode")
+        fi
+    fi
+
+
+    if [ $ng_mode != ack ]; then
+
+        if [ $flg_sticky -eq 1 ] ; then
+            flg_error=1
+            ng_error=$(echo -e "$ng_error\n\tSticky is not valid in $ng_mode mode")
+        fi
+
+        if [ $flg_notify -eq 1 ] ; then
+            flg_error=1
+            ng_error=$(echo -e "$ng_error\n\tNotify is not valid in $ng_mode mode")
+        fi
+    fi
+
+    if [ $ng_mode == ack ]; then
+
+        out DEBUG "Beginning ACK mode checks\n"
+    
+        # Any referecnes to time aren't valid here
+        ng_time_check=$(( $flg_begintime + $flg_endtime + $flg_minutes + $flg_hours ))
+        out DEBUG "Time check is $ng_time_check"
+        if [ $ng_time_check -gt 0 ]; then
+            flg_error=1
+            ng_error=$(echo -e "$ng_error\n\tTimes or durations are not valid for 'ack' mode")
+        fi
+
+        if [ ${#cmd_targets} -eq 0 ] && [ ${#cmd_services} -eq 0 ]; then
+            flg_error=1
+            ng_error="$ng_error\n\tNothing to acknowledge"
+        fi
+
+        # If generic errors or specific errors were found, report them and exit
+        if [ $flg_error -eq 1 ]; then out err "$ng_error"; exit 1; fi
+
+        out DEBUG "Finished error checking in ACK mode"
+
+    fi
+
+    # If generic errors or specific errors were found, report them and exit
+    if [ $flg_error -eq 1 ]; then out err "$ng_error"; exit 1; fi
+
+    # Looking good, output some info if we're in either verbose modes
+    if [ $flg_verbose -eq 1 ] || [ $flg_veryverbose -eq 1 ]; then
+        out INFO "The following values will be used for mode $ng_mode:\n"
+        out info "Targets:\t$cmd_targets\n"
+        if [ $flg_service -gt 0 ]; then
+            out info "Services:\t$cmd_services\n"
+        fi
+        if [ $flg_begintime -gt 0 ]; then
+            datefunc unix $cmd_starttime
+            out info "Start:\t\t$cmd_starttime ($func_time)\n"
+            datefunc unix $cmd_endtime
+            out info "End:\t\t$cmd_endtime ($func_time)\n"
+        fi
+        out info "Comment:\t$cmd_comment\n"
+        out info "User:\t\t$cmd_user\n"
+    fi
+
+    #if [ $devMode -gt 0 ]; then 
+    #    out ok "In devMode $devMode we don't try and validate the commands\n\n"
+#---------------------------------------------------------------------
+
+    # Experimental - tries to predict execution time (badly so far)
+    if [ -r schedule.inc ]; then
+        source schedule.inc
+        schedule
+    fi
+    # To aid the schedule.inc code, record start time of command processing
+    # (might as well do this unconditionally)
+    datefunc "now"
+    ng_down_start=$func_time
+    out DEBUG "Starting command process at $ng_down_start"
+
+
+    for targethost in $cmd_targets; do
+        if [ $flg_service -eq 0 ] && [ "$cmd_services" == "" ]; then
+            # a bit of a fudge, but it almost halves the amount of code needed
+            cmd_services='at_least_one_loop_for_host_only_downtimes'
+        fi
+        for service in $cmd_services; do
+            ls_command=undefined
+            if [ $ng_mode == down ]; then
+
+                if [ $flg_service -eq 1 ]; then
+                    ls_command="COMMAND [$(date +%s)] SCHEDULE_SVC_DOWNTIME;$targethost;$service;$cmd_starttime;$cmd_endtime;1;0;0;$cmd_user;$cmd_comment\n"
+                    lql_pre_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nColumns: host_name\n"
+                    lql_post_query="GET downtimes\nFilter: author = $cmd_user\nFilter: host_name = $targethost\nFilter: end_time = $cmd_endtime\nFilter: start_time = $cmd_starttime\nFilter: service_description = $service\nColumns: id\n"
+                else
+                    ls_command="COMMAND [$(date +%s)] SCHEDULE_HOST_DOWNTIME;$targethost;$cmd_starttime;$cmd_endtime;1;0;0;$cmd_user;$cmd_comment\n"
+                    lql_pre_query="GET hosts\nFilter: name = $targethost\nColumns: name\n"
+                    lql_post_query="GET downtimes\nFilter: author = $cmd_user\nFilter: host_name = $targethost\nFilter: end_time = $cmd_endtime\nFilter: start_time = $cmd_starttime\nColumns: id\n"
+                fi
+
+            elif [ $ng_mode == ack ]; then
+
+                if [ $flg_service -eq 1 ]; then
+                    ls_command="COMMAND [$(date +%s)] ACKNOWLEDGE_SVC_PROBLEM;$targethost;$service;$cmd_sticky;$cmd_notify;$cmd_persistent;$cmd_user;$cmd_comment\n"
+                    lql_pre_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nFilter: state >= 1\nColumns: host_name\n"
+                    lql_post_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nFilter: state >= 1\nFilter: acknowledged = 1\nColumns: acknowledgement_type\n"
+                else
+                    ls_command="COMMAND [$(date +%s)] ACKNOWLEDGE_HOST_PROBLEM;$targethost;$cmd_sticky;$cmd_notify;$cmd_persistent;$cmd_user;$cmd_comment\n"
+                    lql_pre_query="GET hosts\nFilter: host_name = $targethost\nFilter: state >= 1\nColumns: host_name\n"
+                    lql_post_query="GET hosts\nFilter: host_name = $targethost\nFilter: state >= 1\nFilter: acknowledged = 1\nColumns: acknowledgement_type\n"
+                fi
+
+            elif [ $ng_mode == discheck ]; then
+
+                if [ $flg_service -eq 1 ]; then
+                    ls_command="COMMAND [$(date +%s)] DISABLE_SVC_CHECK;$targethost;$service\n"
+                    lql_pre_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nColumns: host_name\n"
+                    lql_post_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nFilter: checks_enabled = 0\nColumns: checks_enabled\n"
+                else
+                    ls_command="COMMAND [$(date +%s)] DISABLE_HOST_CHECK;$targethost\n"
+                    lql_pre_query="GET hosts\nFilter: host_name = $targethost\nColumns: host_name\n"
+                    lql_post_query="GET hosts\nFilter: host_name = $targethost\nFilter: state >= 1\nFilter: checks_enabled = 0\nColumns: checks_enabled\n"
+                fi
+
+            elif [ $ng_mode == encheck ]; then
+
+                if [ $flg_service -eq 1 ]; then
+                    ls_command="COMMAND [$(date +%s)] ENABLE_SVC_CHECK;$targethost;$service\n"
+                    lql_pre_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nColumns: host_name\n"
+                    lql_post_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nFilter: checks_enabled = 1\nColumns: checks_enabled\n"
+                else
+                    ls_command="COMMAND [$(date +%s)] ENABLE_HOST_CHECK;$targethost\n"
+                    lql_pre_query="GET hosts\nFilter: host_name = $targethost\nColumns: host_name\n"
+                    lql_post_query="GET hosts\nFilter: host_name = $targethost\nFilter: state >= 1\nFilter: checks_enabled = 1\nColumns: checks_enabled\n"
+                fi
+
+            elif [ $ng_mode == disnotif ]; then
+
+                if [ $flg_service -eq 1 ]; then
+                    ls_command="COMMAND [$(date +%s)] DISABLE_SVC_NOTIFICATIONS;$targethost;$service\n"
+                    lql_pre_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nColumns: host_name\n"
+                    lql_post_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nFilter: notifications_enabled = 0\nColumns: notifications_enabled\n"
+                else
+                    ls_command="COMMAND [$(date +%s)] DISABLE_HOST_NOTIFICATIONS;$targethost\n"
+                    lql_pre_query="GET hosts\nFilter: host_name = $targethost\nColumns: host_name\n"
+                    lql_post_query="GET hosts\nFilter: host_name = $targethost\nFilter: state >= 1\nFilter: notifications_enabled = 0\nColumns: notifications_enabled\n"
+                fi
+
+            elif [ $ng_mode == ennotif ]; then
+
+                if [ $flg_service -eq 1 ]; then
+                    ls_command="COMMAND [$(date +%s)] ENABLE_SVC_NOTIFICATIONS;$targethost;$service\n"
+                    lql_pre_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nColumns: host_name\n"
+                    lql_post_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nFilter: notifications_enabled = 1\nColumns: notifications_enabled\n"
+                else
+                    ls_command="COMMAND [$(date +%s)] ENABLE_HOST_NOTIFICATIONS;$targethost\n"
+                    lql_pre_query="GET hosts\nFilter: host_name = $targethost\nColumns: host_name\n"
+                    lql_post_query="GET hosts\nFilter: host_name = $targethost\nFilter: state >= 1\nFilter: notifications_enabled = 1\nColumns: notifications_enabled\n"
+                fi
+
+            fi
+
+            if [ "$ls_command" == "undefined" ]; then
+                out info "Mode $ng_mode not implemented yet, sorry\n"
+                exit 21
+            fi
+
+            if [ $flg_veryverbose -eq 1 ]; then out info "$ls_command" ;fi
+            out debug "Pre-query:\n$lql_pre_query"
+            if [ $flg_veryverbose -eq 0 ]; then out debug "$ls_command"; fi
+            out debug "Post-query:\n$lql_post_query"
+            if [ $flg_test -eq 0 ] && [ $devMode -eq 0 ]; then
+
+                # Send the pre_query and see if what we're looking to downtime exists
+                # if it does
+                lql_result=$(echo -e "$lql_pre_query" | unixcat $env_livestatus)
+                out DEBUG "Pre-query result: $lql_result"
+                if [ "$lql_result" == "$targethost" ]; then
+                    # check we can write to $env_cmdpipe
+                    if [ -w $env_cmdpipe ]; then
+                        # start some retry logic here
+
+                        cmd_dt_tries=1               # number of times we've tried sending the command
+                        cmd_validate_tries=1         # number of times we've tried to validate, afer each command try
+                        flg_command_success=0        # set to 1 once we've successfully validated the command
+
+                        while [ $flg_command_success -eq 0 ]  && [ $cmd_dt_tries -le $cmd_retries ];
+                        do
+                            out DEBUG "Sending command to $env_cmdpipe, try $cmd_dt_tries"
+                            echo -e "$ls_command" $(date +%s) > $env_cmdpipe
+                            if [ $flg_quiet -eq 0 ]; then printf "*" ; back="$back\b"; fi    # Bit of a hack for now
+                            sleep $ng_sleepZ
+                            while [ $flg_command_success -eq 0 ]  && [ $cmd_validate_tries -le $cmd_validate_retries ];
+                            do
+                                out DEBUG "Validating via $env_livestatus, try $cmd_validate_tries"
+                                lql_result=$(echo -e "$lql_post_query" | unixcat $env_livestatus)
+                                out DEBUG "Post-query result: $lql_result"
+                                if [ ${#lql_result} -gt 0 ]; then
+                                    if [ $flg_quiet -eq 0 ]; then
+                                        printf "$back"    # Bit of a hack for now
+                                        if [ $flg_service -eq 0 ]; then
+                                            out ok "Success: $targethost - result $lql_result\n"
+                                        else
+                                            out ok "Success: $service on $targethost - result $lql_result\n"
+                                        fi
+                                        flg_command_success=1
+                                    else
+                                        echo -e $lql_result'\n'
+                                        flg_command_success=1
+                                    fi
+                                else
+                                    if [ $flg_quiet -eq 0 ]; then printf "." ; back="$back\b"; fi    # Bit of a hack for now
+                                    cmd_validate_tries=$(( $cmd_validate_tries + 1 ))
+                                    sleep $ng_sleepz 
+                                fi
+                            done
+                            cmd_validate_tries=1
+                            cmd_dt_tries=$(( $cmd_dt_tries + 1 ))
+                        done
+
+                        if [ $flg_command_success -eq 0 ]; then
+                            cmd_dt_tries=$(( $cmd_dt_tries - 1 ))
+                            if [ $flg_quiet -eq 0 ]; then
+                                printf "$back"    # Bit of a hack for now
+                                if [ $flg_service -eq 0 ]; then
+                                    out err "Failed: $targethost - after $cmd_dt_tries attempts\n"
+                                else
+                                    out err "Failed: $service on $targethost - after $cmd_dt_tries attempts\n"
+                                fi
+                            else
+                                out err -1
+                            fi
+                        fi
+                        # end some retry logic here
+                    else
+                        # Start by being harsh
+                        out err "Trying to send command but can't write to socket"
+                        exit 1
+                    fi
+                else
+                    out err "Trying to send command for invalid host and/or service: $service $targethost"
+                    #exit 1
+                fi
+            else
+                out debug "In devMode $devMode, or with -t we don't try and send the commands\n"
+                out DEBUG "$ls_command"
+            fi
+        done
+    done
+
+    # Record the end time of execution, again to support schedule.inc
+    datefunc "now"
+    ng_down_finish=$func_time
+    out DEBUG "End of command process"
+    ng_down_time=$(( $ng_down_finish - $ng_down_start ))
+    out DEBUG "Execution took $ng_down_time seconds"
+    if [ $flg_quiet -eq 0 ]; then
+        out ok "Execution took $ng_down_time seconds\n"
+    fi
+
+#   End of command mode code
+#------------------------------------------------------------------------------------------------------------------
+
+
+
+#------------------------------------------------------------------------------------------------------------------
+# Starting error checking in query mode
+
+elif [ "$ng_mode" == "query" ]; then
+
+    out DEBUG "query mode - fun!  Needs a query nameand other parameters\n"
+    
+    if [ $flg_quiet -eq 1 ] ; then
+        flg_error=1
+        ng_error=$(echo -e "$ng_error\n\tQuiet is not valid in query mode")
+    fi
+
+#   Check that we only have 1 hostname
+    tmpArray=($ng_hostnames)
+    if [ ${#tmpArray[@]} -gt 1 ]; then
+        flg_error=1
+        ng_error=$(echo -e "$ng_error\n\tMultiple hostnames are not valid in query mode")
+    fi
+
+#   Check that we only have 1 hostgroup
+    tmpArray=($ng_hostgroups)
+    if [ ${#tmpArray[@]} -gt 1 ]; then
+        flg_error=1
+        ng_error=$(echo -e "$ng_error\n\tMultiple hostgroups are not valid in query mode")
+    fi
+
+#   Check that we only have 1 service
+    tmpArray=($cmd_services)
+    if [ ${#tmpArray[@]} -gt 1 ]; then
+        flg_error=1
+        ng_error=$(echo -e "$ng_error\n\tMultiple services are not valid in query mode")
+    fi
+
+#   Check that we have a max of 5 custom values
+    if [ ${#ng_custom[@]} -gt 5 ]; then
+        flg_error=1
+        ng_error=$(echo -e "$ng_error\n\tOnly 5 custom values are allowed, found ${#ng_custom[@]}")
+    fi
+
+#   Check if config file is provided or use default
+    if [ $flg_config_filename -gt 0 ]; then
+        if [ -f $ng_config_filename ]; then
+            out debug $ng_config_filename exists
+            ngq_filename=$ng_config_filename
+        else
+            flg_error=1
+            ng_error=$(echo -e "$ng_error\n\tConfig file not found: $ng_config_filename")
+        fi
+    fi
+
+#   Check we've got a query name, unless with --list or --validate
+    if [ $fnd_query_name -eq 0 ] ; then
+        if [ $flg_list -gt 0 ] || [ $flg_validate -gt 0 ]; then
+            out debug "Query name not needed"
+        else        
+            flg_error=1
+            ng_error=$(echo -e "$ng_error\n\tRequired query name not found")
+        fi
+    fi
+
+#   Validate what if any state we've got and convert OK|ok to 0, WARN|warn to 1, etc
+
+    if [ $fnd_state -gt 0 ]; then
+        out DEBUG Checking value of $ng_state
+        case $ng_state in
+            ok|OK|Ok|0)
+                ng_state=0
+                out debug Setting state to $ng_state
+                ;;
+            warn|WARN|Warn|1)
+                ng_state=1
+                out debug Setting state to $ng_state
+                ;;
+            crit|critical|CRIT|CRITICAL|Critical|2)
+                ng_state=2
+                out debug Setting state to $ng_state
+                ;;
+            unknown|UNKNOWN|Unknown|unk|UNK|3)
+                ng_state=3
+                out debug Setting state to $ng_state
+                ;;
+            *)
+                flg_error=1
+                ng_error=$(echo -e "$ng_error\n\tInvalid value '$ng_state' for parameter state")
+        esac
+    else
+        ng_state=-1
+    fi
+
+    # If generic errors or specific errors were found, report them and exit
+    if [ $flg_error -eq 1 ]; then out err "$ng_error"; exit 1; fi
+
+
+    # Start of query mode
+    # --------------------------------------------------------------------------------------
+
+
+    # List of LQL keywords to check when validating
+    # Add to it if you have valid LQL that fails to pass
+    LQLprefix=(
+        GET
+        Filter
+        Columns
+        Or
+        And
+        Negate
+        Separators
+        OutputFormat
+        Stats
+        Limit
+        ColumnHeaders
+    )
+
+    # List of keywords used in the ngctlq.conf file
+    ngctlq_conf_prefix=(
+        begin
+        description
+        author
+        end
+    )
+
+    # Variables used in the configuration file
+    # These are replaced with values specified to ngctl
+    ngVariables=(
+        NG_HOST_NAME
+        NG_HOSTGROUP
+        NG_SERVICE
+        NG_STATE
+        NG_CURRENT_USER
+        NG_USER
+        NG_UNIXTIME_B
+        NG_UNIXTIME_E
+        NG_CUSTOM_1
+        NG_CUSTOM_2
+        NG_CUSTOM_3
+        NG_CUSTOM_4
+        NG_CUSTOM_5
+    )
+
+    # Set default values to 'not_set' so we can test later
+    ngq_host_name=not_set
+    ngq_hostgroup=not_set
+    ngq_service=not_set
+    ngq_state=not_set
+    ngq_current_user=not_set
+    ngq_user=not_set
+    ngq_unixtime_b=not_set
+    ngq_unixtime_e=not_set
+    ngq_custom_1=not_set
+    ngq_custom_2=not_set
+    ngq_custom_3=not_set
+    ngq_custom_4=not_set
+    ngq_custom_5=not_set
+
+
+    # This is where we set the values used in the ngValues array from the gathered parameters
+
+    section=$ng_query_name
+
+    if [ ${#ng_hostnames} -gt 0 ]; then
+        ngq_host_name=$ng_hostnames
+    fi
+
+    if [ ${#ng_hostgroups} -gt 0 ]; then
+        ngq_hostgroup=$ng_hostgroups
+    fi
+
+    if [ ${#cmd_services} -gt 0 ]; then
+        ngq_service=$cmd_services
+    fi
+
+    if [ $ng_state -ge 0 ]; then
+        ngq_state=$ng_state
+    fi
+
+    ngq_current_user=$cmd_user
+
+    if [ ${#ng_username} -gt 0 ]; then
+        ngq_user=$ng_username
+    fi
+
+    if [ $cmd_starttime -gt 0 ]; then
+        ngq_unixtime_b=$cmd_starttime
+    fi
+
+    if [ $cmd_endtime -gt 0 ]; then
+        ngq_unixtime_e=$cmd_endtime
+    fi
+
+    # check the custom values ${#ng_custom[@]}
+    # There has to be a better way to do this
+
+    if [ $flg_custom -gt 0 ]; then
+        if [ ${#ng_custom[0]} -gt 0 ]; then
+            ngq_custom_1=${ng_custom[0]}
+        fi
+        if [ ${#ng_custom[1]} -gt 0 ]; then
+            ngq_custom_2=${ng_custom[1]}
+        fi
+        if [ ${#ng_custom[2]} -gt 0 ]; then
+            ngq_custom_3=${ng_custom[2]}
+        fi
+        if [ ${#ng_custom[3]} -gt 0 ]; then
+            ngq_custom_4=${ng_custom[3]}
+        fi
+        if [ ${#ng_custom[4]} -gt 0 ]; then
+            ngq_custom_5=${ng_custom[4]}
+        fi
+    fi
+
+    ngValues=(
+        $ngq_host_name
+        $ngq_hostgroup
+        $ngq_service
+        $ngq_state
+        $ngq_current_user
+        $ngq_user
+        $ngq_unixtime_b
+        $ngq_unixtime_e
+        $ngq_custom_1
+        $ngq_custom_2
+        $ngq_custom_3
+        $ngq_custom_4
+        $ngq_custom_5
+    )
+
+    ngVarCount=${#ngVariables[@]}
+    ngValCount=${#ngValues[@]}
+
+    # This function isn't used anymore. 
+    validateLQL() {
+        validLQL=0
+        for i in ${LQLprefix[*]}
+        do
+            prefixLen=${#i}
+            if [ "${1:0:$prefixLen}" == "$i" ]; then
+                validLQL=1
+                return 0
+            else
+                echo $i doesn\'t look good > /dev/null
+            fi
+        return 1
+        done
+    }
+
+    # This function replaces ngVariables in the config file with ngValues
+    replaceVariables() {
+        incoming=$@
+        replaced=0
+        count=0
+        replaceFail=0
+        while [ $count -lt ${#ngVariables[@]} ];
+        do
+            # echo Looking for ${ngVariables[$count]}
+            if [[ $incoming == *${ngVariables[$count]}* ]]; then 
+                if [ ${ngValues[$count]} == 'not_set' ]; then
+                    echo "Can't replace ${ngVariables[$count]} with ${ngValues[$count]}"
+                    replaceFail=1
+                else
+                    outgoing=$(echo $incoming | sed "s/${ngVariables[$count]}/${ngValues[$count]}/g")
+                    if [ ${#outgoing} -gt 0 ]; then
+                        replaced=1
+                    fi
+                fi
+            fi
+            count=$(( $count + 1 ))
+        done
+    }
+
+    # This reads the config file looking for a query difinition names 'section' and builds the LQL query
+    buildLQL() {
+        fnd_section=0
+        readLine=0
+        while read -r line
+        do
+            readLine=$(( $readLine + 1 ))
+            if [ $fnd_section -eq 1 ]; then fnd_section=2; fi
+            # discard comments and blank lines
+            if [ ${#line} -gt 0 ]; then
+                if [ ${line:0:1} != \# ]; then
+                    line=$(echo $line |cut -d# -f1)
+                    if [ "$line" == "begin:$section" ]; then
+                        if [ $fnd_section -eq 1 ]; then
+                            echo Error in $ngq_filename: unexpected 'begin:' at line $readLine
+                            exit 1
+                        else
+                            fnd_section=1
+                        fi
+                    elif [ "$line" == "end" ] && [ $fnd_section -eq 2 ]; then
+                        fnd_section=3
+                        break
+                    fi
+
+                    if [ $fnd_section -eq 2 ]; then
+                        if [ "${line:0:11}" != "description" ] && [ "${line:0:6}" != "author" ]; then
+                            #validateLQL $line
+                            replaceVariables $line
+                            if [ $replaceFail -eq 0 ]; then 
+                                if [ $replaced -gt 0 ]; then
+                                    line=$outgoing
+                                fi
+                                if [ ${#lql} -gt 0 ]; then
+                                    lql="$lql\n$line"
+                                else
+                                    lql="$line"
+                                fi
+                            else
+                                echo "Error. Failed to replace unset variables in query $section, ($ngq_filename, line $readLine)"
+                                echo "Ensure you provide valid values for your chosen query"
+                                exit 2
+                            fi
+                        fi
+                    fi
+                fi
+            fi
+        done < $ngq_filename
+    }
+
+    # validateConfig() doe some basic validation of the query configuration file 
+    validateConfig() {
+        readLine=0
+        validation_result='pass'
+        validation_state='looking'
+        validation_description=0
+        validation_line=0
+
+        while read -r line
+        do
+            readLine=$(( $readLine + 1 ))
+            if [ ${#line} -gt 0 ]; then
+                #echo Line $readLine: $line
+                #echo Prefix ${line:0:5}
+                #echo Length ${#line}
+
+                # Checking for 'begin'
+                if [ ${#line} -gt 4 ]; then
+                    if [ "${line:0:5}" == "begin" ]; then
+                        if [ $validation_state == looking ]; then
+                            #echo Line is valid - found begin
+                            validation_state='in_query'
+                            validation_line=1
+                        elif [ "$validation_state" == "in_query" ]; then
+                            echo Line $readLine: Line is invalid - found 'begin' inside query definition
+                            validation_result='fail'
+                            validation_line=1
+                        fi
+                    fi
+                fi
+
+                # Checking for 'end'
+                if [ ${#line} -gt 2 ]; then
+                    if [ "${line:0:3}" == "end" ]; then
+                        if [ $validation_state == in_query ]; then
+                            if [ $validation_description -gt 0 ]; then
+                                #echo Line is valid - found end
+                                validation_state='looking'
+                                validation_description=0
+                                validation_line=1
+                            else
+                                echo Line $readLine: Line is invalid - found 'end' of query definition without description
+                                validation_result='fail'
+                                validation_line=1    
+                            fi
+                        elif [ "$validation_state" == "looking" ]; then
+                            echo Line $readLine: Line is invalid - found 'end' outside of query definition
+                            validation_result='fail'
+                            validation_line=1
+                        fi
+                    fi
+                fi
+
+                # Checking for 'description'
+                if [ ${#line} -gt 10 ]; then
+                    if [ "${line:0:11}" == "description" ]; then
+                        if [ $validation_state == in_query ]; then
+                                #echo Line is valid - found description
+                                validation_description=1
+                                validation_line=1
+                        elif [ "$validation_state" == "looking" ]; then
+                            echo Line $readLine: Line is invalid - found 'description' outside of query definition
+                            validation_result='fail'
+                            validation_line=1
+                        fi
+                    fi
+                fi
+
+                # Checking for 'author'
+                if [ ${#line} -gt 5 ]; then
+                    if [ "${line:0:6}" == "author" ]; then
+                        if [ $validation_state == in_query ]; then
+                                #echo Line is valid - found description
+                                validation_line=1
+                        elif [ "$validation_state" == "looking" ]; then
+                            echo Line $readLine:  Line is invalid - found 'author' outside of query definition
+                            validation_result='fail'
+                            validation_line=1
+                        fi
+                    fi
+                fi
+
+                if [ $validation_line -eq 0 ] && [ ${#line} -gt 0 ]; then
+
+                    if [ "${line:0:1}" == "#" ]; then
+                        #echo Found comment
+                        validation_line=1
+                    else 
+                        LQL_count=${#LQLprefix[@]}
+                        #echo Keywords to check $LQL_count
+                        lcounter=0
+                        while [ $lcounter -lt $LQL_count ];
+                        do
+                            keyword=${LQLprefix[$lcounter]}
+                            keyword_length=${#keyword}
+                            if [ ${#line} -ge $keyword_length ]; then
+                                #echo Checking $keyword $keyword_length
+                                if [ "${line:0:$keyword_length}" == "$keyword" ]; then
+                                
+                                    if [ $validation_state == 'in_query' ]; then
+                                        validation_line=1
+                                    else
+                                        echo Line $readLine: LQL keyword found outside of query definition
+                                        validation_result='fail'
+                                        validation_line=1
+                                    fi
+                                fi
+                            fi
+                        lcounter=$(( $lcounter + 1 ))
+                        done
+                    fi
+                fi
+            fi
+            if [ $validation_line -eq 0 ] && [ ${#line} -gt 0 ]; then
+                echo Line $readLine:  Line is invalid - unrecognised
+                validation_result='fail'
+            fi
+            validation_line=0
+        done < $ngq_filename
+
+        if [ $validation_result == 'fail' ]; then
+            echo -e "\nConfiguration file '$ngq_filename' failed validation tests"
+            exit 1
+        fi
+
+        return 0
+
+    }
+
+    # This parses the configuration file and lists configured queries
+    listQueries(){
+        out debug "Listing available queries"
+        while read -r line
+        do
+            if [ ${#line} -ge 5 ]; then
+                if [ "${line:0:5}" == "begin" ]; then
+                    line=$(echo $line | cut -d# -f1)
+                    line=$(echo $line | cut -d: -f2)
+                    out ok "\nQuery name:\t$line\n"
+                fi
+            fi
+            if [ ${#line} -ge 11 ]; then
+                if [ "${line:0:11}" == "description" ]; then
+                    line=$(echo $line | cut -d# -f1)
+                    line=$(echo $line | cut -d: -f2)
+                    out info "Description:\t$line\n"
+                fi
+            fi
+            if [ ${#line} -ge 6 ]; then
+                if [ "${line:0:6}" == "author" ]; then
+                    line=$(echo $line | cut -d# -f1)
+                    line=$(echo $line | cut -d: -f2)
+                    out info "Author:\t\t$line\n"
+                fi
+            fi
+        done < $ngq_filename
+        echo -e "\n"
+    }
+
+    if [ $flg_validate -gt 0 ]; then
+        out INFO "Validating $ngq_filename\n"
+        validateConfig
+        out info "File $ngq_filename looks valid\n"
+        exit 0
+    fi
+
+    out debug "Validating configuration file $ngq_filename"
+    validateConfig
+    if [ $? -eq 0 ]; then
+        out debug "Configuration file looks valid"
+    fi
+
+    if [ $flg_list -gt 0 ]; then
+        out INFO "\nListing queries in $ngq_filename\n"
+        listQueries
+        exit 0
+    fi
+
+    
+    buildLQL
+    if [ ${#lql} -gt 0 ]; then
+        if [ $flg_test -gt 0 ] || [ $flg_verbose -gt 0 ] || [ $devMode -gt 0 ]; then
+            lql="$lql\n"
+            echo -e "\nGot query[\n$lql]\n"
+        else 
+            out debug "Sending query"
+            ngq_result=$(echo -e "$lql\n" | unixcat /var/spool/nagios/cmd/live)
+            echo -e "$ngq_result"
+        fi
+    else
+        echo Unable to find query for $section
+    fi
+
+
+    # End of query mode (and several more... tbc)
+    # --------------------------------------------------------------------------------------
+
+
+fi

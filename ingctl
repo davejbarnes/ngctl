@@ -1,0 +1,814 @@
+#!/bin/bash
+
+# Interactive menu for ngctl
+# PoC - will need refactoring : there is a mishmash of variable names and absolute values
+# This at least proves the functions and flow
+
+
+bm_numbers=( 0 ⑴ ⑵ ⑶ ⑷ ⑸ ⑹ ⑺ ⑻ ⑼ ⑽ )
+#bm_ul=╭;bm_ll=╰;bm_ur=╮;bm_lr=╯;bm_h=─;bm_v=│;bm_lt=├;bm_rt=┤
+bm_minimum_width=30
+bm_colour_scheme="standard"
+st_debug=0
+
+if [ $bm_colour_scheme == standard ]; then
+    bm_colour_border="\e[34m"
+    bm_colour_title="\e[97m\e[44m\e[1m"
+    bm_colour_footer="\e[33m"
+    bm_colour_options="\e[32m"
+    bm_colour_numbers="\e[92m\e[1m"
+fi
+
+out (){
+    case "$1" in
+        info)
+            printf "$fg_blue$2$fbg_reset"
+            ;;
+        INFO)
+            printf "$bg_blue$2$fbg_reset"
+            ;;
+        ok)
+            printf "$fg_green$2$fbg_reset"
+            ;;
+        OK)
+            printf "$bg_green$2$fbg_reset"
+            ;;
+        debug)
+            if [ $st_debug -gt 0 ] || [ $st_debug -eq 2 ];then
+                printf "$bg_grey";echo -e "$@$fbg_reset"
+                sleep 2
+                return 0
+            fi
+            ;;
+        DEBUG)
+            if [ $st_debug -eq 2 ];then
+                printf "$fg_bold$bg_grey";echo -e "$@$fbg_reset"
+                return 0
+            fi
+            ;;            
+        hint)
+            printf "\t$fg_purple""Hint:\t$2$fbg_reset"
+            ;;
+        HINT)
+            printf "\t$bg_purple""Hint:\t$2$fbg_reset"
+            ;;             
+        err)
+            printf "$fg_red$2$fbg_reset\n" > /dev/stderr
+            return 1
+            ;;
+        ERR)
+            printf "$bg_red$2$fbg_reset\n" > /dev/stderr
+            return 1
+            ;;
+    esac
+}
+
+makeString(){
+    madeString=''
+    count=1
+    while [ $count -le $1 ];
+    do
+        madeString=$madeString''$2
+        count=$(( $count + 1 ))
+    done    
+}
+
+getValue() {
+
+    valueChars=[0-9]
+    valueLength=5
+
+    if [ '$1' != '' ]; then valueLength="$1"; fi
+    if [ '$2' != '' ]; then valueChars="$2"; fi
+    if [ '$3' != '' ]; then 
+        value="$3"
+    else
+        value='not'
+    fi
+    # Have we already got value for this but are repeating?
+    if [ ${#bm_input_values[$i]} -gt 0 ]; then value=${bm_input_values[$i]}; fi
+
+    printf "$bm_colour_options\e[100m\e[4m"$value"\e[0m"
+
+    while [ 1 -eq 1 ]
+    do
+        read -s -n 1  &> /dev/null
+        isSpecial=$(echo "$REPLY" | od | cut -d" " -f2 | head -n 1)
+        #echo $isSpecial
+        if [ "$isSpecial" == "005177" ]; then
+            valLen=${#value}
+            newvalLen=$(( $valLen - 1 ))
+            if [ $newvalLen -gt 0 ]; then
+                value="${value:0:$newvalLen}"
+                printf "\b$bm_colour_options\e[100m\e[4m \b\e[0m"
+            else
+                if [ ${#value} -gt 0 ]; then
+                    printf "\b$bm_colour_options\e[100m\e[4m \b\e[0m"
+                    value=''
+                fi
+            fi
+        elif [ "$isSpecial" == "000012" ] || [ "$isSpecial" == "005011" ] || [ "$isSpecial" == "005033" ] ; then  
+                break
+        else
+            echo $REPLY | grep -P "$valueChars" &> /dev/null
+            if [ $? -eq 0 ]; then
+                if [ ${#value} -lt $valueLength ]; then
+                    printf "$bm_colour_options\e[100m\e[4m$REPLY\e[0m"
+                    value="$value$REPLY"
+                fi
+            fi
+        fi
+    done
+}
+
+
+doPrompt() {
+
+    clear
+    bm_terminal_width=$(tput cols)
+    bm_terminal_height=$(tput lines)
+
+    bm_title_length=${#bm_title}
+
+    bm_max_input_length=1
+    for count in ${!bm_input_lengths[@]};
+    do
+        if [ ${bm_input_lengths[$count]} -gt $bm_max_input_length ]; then
+            bm_max_input_length=${bm_input_lengths[$count]}
+        fi
+    done
+
+    bm_option_max_length=1
+    for count in ${!bm_input_prompts[@]};
+    do
+        option=$(( ${#bm_input_prompts[$count]} + $bm_max_input_length ))
+        if [ $option -gt $bm_option_max_length ]; then
+            bm_option_max_length=$option
+        fi
+    done
+
+    bm_max_prompt_length=1
+    for count in ${!bm_input_prompts[@]};
+    do
+        if [ ${#bm_input_prompts[$count]} -gt $bm_max_prompt_length ]; then
+            bm_max_prompt_length=${#bm_input_prompts[$count]}
+        fi
+    done
+
+    bm_menu_width=$(( $bm_option_max_length + 9 ))
+    if [ $bm_menu_width -lt $bm_minimum_width ]; then 
+        bm_option_max_length=$(( $bm_option_max_length + 2 ))
+        bm_menu_width=$bm_minimum_width
+    fi
+    bm_max_title_length=$(( $bm_menu_width - 8 ))
+    if [ $bm_max_title_length -lt $bm_title_length ]; then
+        bm_title_diff=$(( $bm_title_length - $bm_max_title_length ))
+        bm_menu_width=$(( $bm_menu_width + $bm_title_diff + 1 ))
+        bm_max_title_length=$(( $bm_title_length + 1 ))
+    fi
+
+    bm_padding_cols=$(( ($bm_terminal_width - $bm_menu_width) / 2 ))
+    bm_padding_lines=$(( ( $bm_terminal_height - ${#bm_input_prompts[@]} - 10 ) / 2 ))
+    makeString $bm_padding_cols ' '
+    bm_left_padding=$madeString
+    makeString $bm_padding_lines '\n'
+    bm_top_padding=$madeString
+
+    printf $bm_top_padding
+
+    # Draw top part of the prompt
+    makeString $(( $bm_menu_width - 7 )) '─'
+    echo -e "$bm_colour_border$bm_left_padding  ╭$madeString╮\e[0m"
+    makeString $(( $bm_max_title_length - $bm_title_length )) ' '
+    echo -e "$bm_colour_border$bm_left_padding╭─┤$bm_colour_title $bm_title$madeString\e[0m$bm_colour_border├──╮\e[0m"
+    makeString $(( $bm_menu_width - 7 )) '─'
+    echo -e "$bm_colour_border$bm_left_padding│ ╰$madeString╯  │\e[0m"
+
+    # Draw the middle bit
+
+    makeString $(( $bm_menu_width - 2 )) ' '
+    echo -e "$bm_colour_border$bm_left_padding│$madeString│\e[0m"
+    for i in ${!bm_input_prompts[@]}
+    do
+        bm_prompt="${bm_input_prompts[$i]}"
+        makeString $(( $bm_max_prompt_length - ${#bm_input_prompts[$i]} )) ' '
+        bm_prompt="$bm_prompt$madeString"
+        makeString $(( ${bm_input_lengths[$i]} + 2 )) " "
+        bm_prompt="$bm_prompt$bm_colour_options [\e[100m\e[4m$madeString$bm_colour_options\e[24m\e[49m]\e[0m"
+        makeString $(( $bm_menu_width - ${bm_input_lengths[$i]} - ${#bm_input_prompts[$i]} - 8 - ( $bm_max_prompt_length - ${#bm_input_prompts[$i]}) )) ' '
+        echo -e "$bm_colour_border$bm_left_padding│ $bm_colour_options$bm_prompt$madeString$bm_colour_border│\e[0m"
+    done
+
+    makeString $(( $bm_menu_width - 2 )) " "
+    echo -e "$bm_colour_border$bm_left_padding│$madeString│\e[0m"
+
+    # Draw the footer
+    # we'll make these optional later
+    bm_footer_options='⒝  back  ⒬  quit  ⒣  help'
+    bm_footer_options='⒬  quit'
+    bm_footer_options='⒝  back  ⒬  quit'
+    bm_footer_options='⒬  quit  ⒣  help'
+    bm_footer_options=''
+    bm_footer_options_length=${#bm_footer_options}
+    
+    if [ $bm_footer_options_length -gt 0 ]; then
+        makeString $(( $bm_menu_width - $bm_footer_options_length -3 )) ' '
+        echo -e "$bm_colour_border$bm_left_padding│ $bm_colour_footer$bm_footer_options$madeString$bm_colour_border│\e[0m"
+    fi
+    makeString $(( $bm_menu_width - 2 )) '─'
+    echo -e "$bm_colour_border$bm_left_padding╰$madeString╯\e[0m"
+
+    # Finished drawing prompts
+
+    # Get the inputs
+    bm_up_lines=${#bm_input_prompts[@]}
+
+    if [ $bm_footer_options_length -gt 0 ]; then
+        up=$(( 4 + $bm_up_lines ))
+    else
+        up=$(( 3 + $bm_up_lines ))
+    fi
+    printf "\033["$up"A"
+    
+
+    for i in ${!bm_input_prompts[@]}
+    do
+        printf "\n\033["$(( ${#bm_left_padding} + $bm_max_prompt_length + 5 ))"C"
+        getValue ${bm_input_lengths[i]} "${bm_input_masks[$i]}" "${bm_input_defaults[$i]}"
+        bm_input_values[$i]=$value
+    done
+
+    # Var bm_input_values now contains inputs
+}
+
+
+doMenu() {
+
+    clear
+    bm_terminal_width=$(tput cols)
+    bm_terminal_height=$(tput lines)
+    bm_colour_scheme="standard"
+
+    bm_title_length=${#bm_title}
+    bm_option_max_length=1
+
+    for count in ${!bm_options[@]};
+    do
+        option=${#bm_options[$count]}
+        if [ $option -gt $bm_option_max_length ]; then
+            bm_option_max_length=$option
+        fi
+    done
+
+    bm_menu_width=$(( $bm_option_max_length + 7 ))
+    if [ $bm_menu_width -lt $bm_minimum_width ]; then bm_menu_width=$bm_minimum_width; fi
+    bm_max_title_length=$(( $bm_menu_width - 8 ))
+    if [ $bm_max_title_length -lt $bm_title_length ]; then
+        bm_title_diff=$(( $bm_title_length - $bm_max_title_length ))
+        bm_menu_width=$(( $bm_menu_width + $bm_title_diff + 1 ))
+        bm_max_title_length=$(( $bm_title_length + 1 ))
+    fi
+
+    bm_padding_cols=$(( ($bm_terminal_width - $bm_menu_width) / 2 ))
+    bm_padding_lines=$(( (($bm_terminal_height - ${#bm_options[@]}  ) / 2) - 6 ))
+    makeString $bm_padding_cols ' '
+    bm_left_padding=$madeString
+    makeString $bm_padding_lines '\n'
+    bm_top_padding=$madeString
+
+    echo -e $bm_top_padding
+
+    # Draw top part of the menu
+    makeString $(( $bm_menu_width - 7 )) '─'
+    echo -e "$bm_colour_border$bm_left_padding  ╭$madeString╮\e[0m"
+    makeString $(( $bm_max_title_length - $bm_title_length )) ' '
+    echo -e "$bm_colour_border$bm_left_padding╭─┤$bm_colour_title $bm_title$madeString\e[0m$bm_colour_border├──╮\e[0m"
+    makeString $(( $bm_menu_width - 7 )) '─'
+    echo -e "$bm_colour_border$bm_left_padding│ ╰$madeString╯  │\e[0m"
+
+    # Draw the options
+    for i in ${!bm_options[@]};
+    do
+        j=$(( $i + 1 ))
+        makeString $(( $bm_menu_width - ${#bm_options[$i]} -6 )) ' '
+        echo -e "$bm_colour_border$bm_left_padding│ $bm_colour_numbers${bm_numbers[$j]}\e[0m  $bm_colour_options${bm_options[$i]}$madeString$bm_colour_border│\e[0m"
+
+    done
+    bm_options_count=$j
+
+    # Draw the footer
+    # we'll make these optional later
+    bm_footer_options='⒝  back  ⒬  quit  ⒣  help'
+    bm_footer_options='⒬  quit'
+    bm_footer_options='⒬  quit  ⒣  help'
+    bm_footer_options_length=${#bm_footer_options}
+
+    makeString $(( $bm_menu_width - 2 )) " "
+    echo -e "$bm_colour_border$bm_left_padding│$madeString│\e[0m"
+    makeString $(( $bm_menu_width - $bm_footer_options_length -3 )) ' '
+    echo -e "$bm_colour_border$bm_left_padding│ $bm_colour_footer$bm_footer_options$madeString$bm_colour_border│\e[0m"
+    makeString $(( $bm_menu_width - 2 )) '─'
+    echo -e "$bm_colour_border$bm_left_padding╰$madeString╯\e[0m"
+
+    # Finished drawing menu
+
+    # Get user's choice
+
+    tput civis
+    bm_menu_valid=0
+    while [ $bm_menu_valid -eq 0 ]
+    do
+        read -s -n 1 bm_chosen 
+        if [ "$bm_chosen" == "q" ]; then
+            echo Goodbye
+            tput cnorm
+            exit 0
+        elif [ "$bm_chosen" == "b" ]; then
+            echo Going back
+            tput cnorm
+            exit 0
+        elif [ "$bm_chosen" == "h" ]; then
+            echo Help!
+            tput cnorm
+            exit 0
+        fi
+        echo $bm_chosen | grep -P "\d" &> /dev/null
+        if [ $? -eq 0 ]; then
+            if [ $bm_chosen -le $bm_options_count ]; then
+                menu_valid=1
+                break
+            fi
+        fi
+    done
+    tput cnorm
+}
+
+doInfo() {
+
+    clear
+    bm_terminal_width=$(tput cols)
+    bm_terminal_height=$(tput lines)
+    bm_colour_scheme="standard"
+
+    bm_title_length=${#bm_title}
+    bm_option_max_length=1
+
+
+    if [ $bm_colour_scheme == standard ]; then
+        bm_colour_border="\e[34m"
+        bm_colour_title="\e[97m\e[44m\e[1m"
+        bm_colour_footer="\e[33m"
+        bm_colour_options="\e[32m"
+        bm_colour_numbers="\e[92m\e[1m"
+    fi
+
+
+    for count in ${!bm_infos[@]};
+    do
+        option=${#bm_infos[$count]}
+        if [ $option -gt $bm_option_max_length ]; then
+            bm_option_max_length=$option
+        fi
+    done
+
+    bm_info_width=$(( $bm_option_max_length + 7 ))
+    if [ $bm_info_width -lt $bm_minimum_width ]; then bm_info_width=$bm_minimum_width; fi
+    bm_max_title_length=$(( $bm_info_width - 8 ))
+    if [ $bm_max_title_length -lt $bm_title_length ]; then
+        bm_title_diff=$(( $bm_title_length - $bm_max_title_length ))
+        bm_info_width=$(( $bm_info_width + $bm_title_diff + 1 ))
+        bm_max_title_length=$(( $bm_title_length + 1 ))
+    fi
+
+    bm_padding_cols=$(( ($bm_terminal_width - $bm_info_width) / 2 ))
+    bm_padding_lines=$(( (($bm_terminal_height - ${#bm_infos}  ) / 2) + 10  ))
+    makeString $bm_padding_cols ' '
+    bm_left_padding=$madeString
+    makeString $bm_padding_lines '\n'
+    bm_top_padding=$madeString
+
+    echo -e $bm_top_padding
+
+    # Draw top part of the info
+    makeString $(( $bm_info_width - 7 )) '─'
+    echo -e "$bm_colour_border$bm_left_padding  ╭$madeString╮\e[0m"
+    makeString $(( $bm_max_title_length - $bm_title_length )) ' '
+    echo -e "$bm_colour_border$bm_left_padding╭─┤$bm_colour_title $bm_title$madeString\e[0m$bm_colour_border├──╮\e[0m"
+    makeString $(( $bm_info_width - 7 )) '─'
+    echo -e "$bm_colour_border$bm_left_padding│ ╰$madeString╯  │\e[0m"
+
+    # Draw the options
+    for i in ${!bm_infos[@]};
+    do
+        j=$(( $i + 1 ))
+        makeString $(( $bm_info_width - ${#bm_infos[$i]} - 5 )) ' '
+        echo -e "$bm_colour_border$bm_left_padding│ \e[0m $bm_colour_options${bm_infos[$i]}$madeString$bm_colour_border │\e[0m"
+
+    done
+    bm_infos_count=$j
+
+    # Draw the footer
+    bm_footer_options='[ Press a key to continue ]'
+    bm_footer_options_length=${#bm_footer_options}
+
+    makeString $(( $bm_info_width - 2 )) " "
+    echo -e "$bm_colour_border$bm_left_padding│$madeString│\e[0m"
+    if (( $bm_info_width % 2 )); then 
+        bm_adjust=' '
+    else
+        bm_adjust=''
+    fi
+    makeString $(( ( $bm_info_width - $bm_footer_options_length -3 ) / 2 )) ' '
+    echo -e "$bm_colour_border$bm_left_padding│$bm_adjust$bm_colour_footer$madeString$bm_footer_options$madeString $bm_colour_border│\e[0m"
+    makeString $(( $bm_info_width - 2 )) '─'
+    echo -e "$bm_colour_border$bm_left_padding╰$madeString╯\e[0m"
+
+    # Finished drawing info
+
+    # Get any key to continue
+
+    tput civis
+    bm_info_valid=0
+    read -s -n 1
+    tput cnorm
+}
+
+
+# Now for some wrapper functions to make the program logic clearer later on
+
+
+infoWelcome() {
+    bm_title="ngctl Interactive"
+    bm_infos=('This is a menu and prompt driven wrapper for ngctl. It will prompt you for choices and' 'input to build the command line options for ngctl.'
+                '' "NOTE: There is little error checking of your input, please enter sensible values" "'ngctl' will however validate your input and show errors accordingly")
+    doInfo
+}
+
+#  Main starting points
+
+showMainMenu() {
+    bm_title="ngctl Interactive - Main Menu"
+    bm_options=('Schedule 1 or more downtimes' 'Remove 1 or more downtimes' 'Acknowledge host or service problem(s)'
+                'Disable or enable host or service notifications' 'Disable or enable host or service checks')
+    doMenu
+}
+
+showDowntimeTypeMenu() {
+    bm_title="Select how to specify targets"
+    bm_options=('Specify one or more hosts' 'Specify one or more services on one or more hosts')
+    doMenu
+}
+
+#  Host Targets
+
+showDowntmeTargetMenu() {
+    bm_title="Select hosts"
+    bm_options=('Specify hostname' 'Specify hostgroup' 'Specify hostname template and range')
+    doMenu
+}
+
+getHostname(){
+    bm_title="Specify hostname"
+    bm_input_prompts=('Hostname')
+    bm_input_lengths=(25)
+    bm_input_masks=("")
+    bm_input_defaults=('guea')
+    doPrompt 
+}
+
+getHostgroup(){
+    bm_title="Specify hostgroup name"
+    bm_input_prompts=('Hostgroup')
+    bm_input_lengths=(15)
+    bm_input_masks=("")
+    bm_input_defaults=('')
+    doPrompt
+}
+
+getHostTemplate() {
+    bm_title="Specify template"
+    bm_input_prompts=('Hostname (no number!)' 'Start number' 'End number' 'Parity (a)ll (e)ven (o)dd')
+    bm_input_lengths=(25 2 2 1)
+    bm_input_masks=("[a-z]" "[0-9]" "[0-9]" "[oea]")
+    bm_input_defaults=('')
+    doPrompt
+}
+
+#  Service Targets
+
+getServicename(){
+    bm_title="Specify service name"
+    bm_input_prompts=('Service name')
+    bm_input_lengths=(25)
+    bm_input_masks=("")
+    bm_input_defaults=('')
+    doPrompt
+}
+
+# Timescales
+
+showTimescaleTypesMenu(){
+    bm_title="Select how to specify timeframe"
+    bm_options=('Start now, specify length (hours/minutes)' 'Start now, specify end time' 'Specify a start and end time')
+    doMenu
+}
+
+getDuration() {
+    bm_title="Specify duration"
+    bm_input_prompts=('Hours' 'Minutes')
+    bm_input_lengths=(2 3)
+    bm_input_masks=("[0-9]" "[0-9]")
+    bm_input_defaults=('')
+    doPrompt
+}
+
+getEndTime(){
+    bm_title="Specify end time ('date' compatible)"
+    bm_input_prompts=('End time')
+    bm_input_lengths=(35)
+    bm_input_masks=("")
+    bm_input_defaults=('')
+    doPrompt
+}
+
+getStartEndTime(){
+    bm_title="Specify start and end time ('date' compatible)"
+    bm_input_prompts=('Start time' 'End time')
+    bm_input_lengths=(35 35)
+    bm_input_masks=("")
+    bm_input_defaults=('')
+    doPrompt
+}
+
+#  Notifications and service checks
+
+showNotificationMenu(){
+    bm_title="Enable or disable notifications"
+    bm_options=("Enable notifications for host(s) or service(s) on host(s)" "Disable notifications for host(s) or service(s) on host(s)")
+    doMenu
+}
+
+showCheckMenu(){
+    bm_title="Enable or disable active checks"
+    bm_options=("Enable checks for host(s) or service(s) on host(s)" "Disable checks for host(s) or service(s) on host(s)")
+    doMenu
+}
+
+#  Misc stuff
+
+getComment(){
+    bm_title="A comment is required"
+    bm_input_prompts=('Comment')
+    bm_input_lengths=(30)
+    bm_input_masks=("")
+    bm_input_defaults=('')
+    doPrompt
+}
+
+infoSorryNotImplemented() {
+    bm_title="Sorry!"
+    bm_infos=("This feature isn't implemented yet" "However you can do this with ngctl")
+    doInfo
+}
+
+infoSorryWTF() {
+    bm_title="Sorry!"
+    bm_infos=("Something unexpected has happened" "Please report this problem")
+    doInfo
+}
+
+
+#  We'll want to get the host targets for a few scenarios, so it makes sense to make that
+#  a function we can call for each scenario.
+
+getHostTargets(){
+    showDowntimeTypeMenu
+        if [ $bm_chosen -eq 2 ]; then
+            flg_need_service=1
+        fi
+        
+        showDowntmeTargetMenu
+        case $bm_chosen in
+
+            1)  # Specify hostname
+                while [ ${#ing_hostname} -eq 0 ];
+                do
+                    getHostname
+                    ing_hostname=${bm_input_values[0]}
+                    out debug "Got hostname $ing_hostname"
+                done
+                ;;
+
+            2)  # Specify hostgroup
+                while [ ${#ing_hostgroup} -eq 0 ];
+                do
+                    getHostgroup
+                    ing_hostgroup=${bm_input_values[0]}
+                    out debug "Got hostgroup $ing_hostgroup"
+                done
+                ;;
+
+
+            3)  # Specify host template
+                while [ ${#ing_hosttemplate} -eq 0 ] || [ ${#ing_hostx} -eq 0 ] || [ ${#ing_hosty} -eq 0 ] || [ ${#ing_hostp} -eq 0 ]
+                do
+                    getHostTemplate
+                    ing_hosttemplate=${bm_input_values[0]}
+                    ing_hostx=${bm_input_values[1]}
+                    ing_hosty=${bm_input_values[2]}
+
+                    if [ "${bm_input_values[3]}" == "a" ]; then ing_hostp=all; fi
+                    if [ "${bm_input_values[3]}" == "e" ]; then ing_hostp=even; fi
+                    if [ "${bm_input_values[3]}" == "o" ]; then ing_hostp=odd; fi
+                    
+                    out debug "Got hostname template "$ing_hosttemplate
+                    out debug "Got range start "$ing_hostx
+                    out debug "Got range end "$ing_hosty
+                    out debug "Got range parity "$ing_hostp
+                done
+                ;;
+
+            *)  # WTF
+
+                infoSorryWTF
+                exit 1
+
+        esac
+}
+
+
+#  Lastly some variables to keep track of what menus / prompts to show
+
+flg_need_service=0
+
+#  Main program flow
+
+infoWelcome
+showMainMenu
+bm_input_values=()
+case $bm_chosen in 
+
+    1) ##############################  Schedule downtimes  ##############################
+
+        ing_mode=''
+        getHostTargets
+        if [ $flg_need_service -eq 1 ]; then
+            bm_input_values=()
+            while [ ${#ing_service} -eq 0 ]
+            do
+                getServicename
+                ing_service=${bm_input_values[0]}
+                out debug "Got service name "$ing_service
+            done
+        fi
+
+        showTimescaleTypesMenu
+        bm_input_values=()
+        case $bm_chosen in
+
+            1)  # Now, hours/minutes
+                while [ ${#ing_minutes} -eq 0 ] && [ ${#ing_hours} -eq 0 ] 
+                do
+                    getDuration
+                    ing_hours=${bm_input_values[0]}
+                    ing_minutes=${bm_input_values[1]}
+                    out debug "Got hours "$ing_hours
+                    out debug "Got minutes "$ing_minutes
+                done
+                ;;
+
+            2)  # Now, end time
+                while [ ${#ing_endtime} -eq 0 ]
+                do
+                    getEndTime
+                    ing_endtime=${bm_input_values[0]}
+                    out debug "Got end time "$ing_endtime
+                done
+                ;;
+
+            3)  # Start and end
+                while [ ${#ing_starttime} -eq 0 ] || [ ${#ing_endtime} -eq 0 ] 
+                do
+                    getStartEndTime
+                    ing_starttime=${bm_input_values[0]}
+                    ing_endtime=${bm_input_values[1]}
+                    out debug "Got start time "$ing_starttime
+                    out debug "Got end time "$ing_endtime
+                done
+                ;;
+
+            *)  # WTF
+                infoSorryWTF
+                exit 1
+                ;;
+        esac
+
+        bm_input_values=()
+        while [ ${#ing_comment} -eq 0 ]
+        do
+            getComment
+            ing_comment=${bm_input_values[0]}
+            out debug "Got comment "$ing_comment
+        done
+        ;;
+
+    2) ##############################  Remove downtimes  ##############################
+
+        infoSorryNotImplemented
+        ;;
+
+    3) ##############################  Acknowledge  ##############################
+
+        ing_mode=ack
+        getHostTargets
+        if [ $flg_need_service -eq 1 ]; then
+            bm_input_values=()
+            while [ ${#ing_service} -eq 0 ]
+            do
+                getServicename
+                ing_service=${bm_input_values[0]}
+                out debug "Got service name "$ing_service
+            done
+        fi
+        bm_input_values=()
+        while [ ${#ing_comment} -eq 0 ]
+        do
+            getComment
+            ing_comment=${bm_input_values[0]}
+            out debug "Got comment "$ing_comment
+        done
+        ;;
+
+    4) ##############################  Notifications  ##############################
+
+        showNotificationMenu
+        if [ $bm_chosen -eq 1 ]; then
+            ing_mode=en
+        elif [ $bm_chosen -eq 1 ]; then
+            ing_mode=dn 
+        else
+            infoSorryWTF
+            exit 1
+        fi
+        getHostTargets
+        if [ $flg_need_service -eq 1 ]; then
+            bm_input_values=()
+            while [ ${#ing_service} -eq 0 ]
+            do
+                getServicename
+                ing_service=${bm_input_values[0]}
+                out debug "Got service name "$ing_service
+            done
+        fi
+        ;;
+
+    5) ##############################  Checks  ##############################
+
+        showCheckMenu
+        if [ $bm_chosen -eq 1 ]; then
+            ing_mode=en
+        elif [ $bm_chosen -eq 1 ]; then
+            ing_mode=dn 
+        else
+            infoSorryWTF
+            exit 1
+        fi
+        getHostTargets
+        if [ $flg_need_service -eq 1 ]; then
+            bm_input_values=()
+            while [ ${#ing_service} -eq 0 ]
+            do
+                getServicename
+                ing_service=${bm_input_values[0]}
+                out debug "Got service name "$ing_service
+            done
+        fi
+        ;;
+
+    *) ##############################  WTF  ##############################
+
+        infoSorryWTF
+        exit 1
+        ;;
+
+esac
+
+ng_command_line="$ing_mode "
+if [ ${#ing_hostname} -gt 0 ]; then ng_command_line="$ng_command_line -h=$ing_hostname "; fi
+if [ ${#ing_hosttemplate} -gt 0 ]; then ng_command_line="$ng_command_line -h=$ing_hosttemplate "; fi
+if [ ${#ing_hostgroup} -gt 0 ]; then ng_command_line="$ng_command_line -H=$ing_hostgroup "; fi
+if [ ${#ing_hostx} -gt 0 ]; then ng_command_line="$ng_command_line -x=$ing_hostx "; fi
+if [ ${#ing_hosty} -gt 0 ]; then ng_command_line="$ng_command_line -y=$ing_hosty "; fi
+if [ ${#ing_hostp} -gt 0 ]; then ng_command_line="$ng_command_line -p=$ing_hostp "; fi
+if [ ${#ing_service} -gt 0 ]; then ng_command_line="$ng_command_line -s='$ing_service' "; fi
+if [ ${#ing_comment} -gt 0 ]; then ng_command_line="$ng_command_line -c='$ing_comment' "; fi
+if [ ${#ing_hours} -gt 0 ]; then ng_command_line="$ng_command_line -D=$ing_hours "; fi
+if [ ${#ing_minutes} -gt 0 ]; then ng_command_line="$ng_command_line -d=$ing_minutes "; fi
+if [ ${#ing_starttime} -gt 0 ]; then ng_command_line="$ng_command_line -b='$ing_starttime' "; fi
+if [ ${#ing_endtime} -gt 0 ]; then ng_command_line="$ng_command_line -e='$ing_endtime' "; fi
+
+clear
+echo ngctl $ng_command_line
+eval ./ngctl $ng_command_line
+exit $?
+
