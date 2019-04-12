@@ -299,8 +299,8 @@ doMenu() {
     # Draw the footer
     # we'll make these optional later
     bm_footer_options='⒝  back  ⒬  quit  ⒣  help'
-    bm_footer_options='⒬  quit'
     bm_footer_options='⒬  quit  ⒣  help'
+    bm_footer_options='⒬  quit'
     bm_footer_options_length=${#bm_footer_options}
 
     makeString $(( $bm_menu_width - 2 )) " "
