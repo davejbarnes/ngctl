@@ -1,0 +1,227 @@
+README
+
+ngctl was born out of a need to quickly and easily set a downtime on an alerting host without having to navigate a web interface.  That morphed into a bigger project to allow setting more specific downtime entries such as a specific service on a specific host, and maybe for a specific time in the future.
+
+Over time this grew to also supporting acknowledging problems, and enabling or disabling checks and notifications.
+
+It's always a work in progress, but it does work.
+
+
+Prerequisites:
+    The Nagios instance must also have Livestatus installed
+    The user running the command needs r/w access to both the Nagios command socket and the Livestatus pipe
+        The locations of the sock and pipe must be specified in the script
+    Normally included dependancies: grep printf unixcat (from Livestatus) 
+
+
+Use
+
+ngctl currently works in seven modes
+ * down             add a host or service downtime
+ * ack              acknowledge host or service problems
+ * dn               Disable host or service notifications
+ * en               Enable host or service notifications
+ * dc               Disable host or service checks
+ * ec               Enable host or service checks
+ * query            Uses the ngctlq.conf file to query Nagios via Livestatus
+
+ Use:   ngctl <mode> options parameters
+ (if mode is not specified, 'down' is the default)
+
+
+Parameters
+
+Parameters which take a value must be specified in the following way: -a=value
+Not all parameters require a value.
+
+
+-b      begin time of a downtime
+        a string representing a time compatible with the 'date' command
+        Examples:   -b="Tomorrow 8am"
+                    -b="2019-10-31 8:00"
+
+-c      comment
+        a string, required for setting downtimes or acknowledging problems
+
+-d      duration in minutes
+        an integer (not valid if an end time is also specified)
+
+-D      duration in hours
+        an integer (not valid if an end time is also specified)
+
+-e      end time of a downtime
+        a string representing a time compatible with the 'date' command (not valid if duration in hours and/or minutes is also specified)
+
+-h      hostname or hostname template
+        a string which begins with the configured prefixes. Can be specified multiple times for a hostname, or can be a quoted space delimited list of hostnames
+        If no number is specified it will be treated as a hostname template, and can only be specified once
+        hostname templates require -x and -y and optionally -p may be specified
+
+-H      hostgroup name
+        a string which is a Nagios hostgroup. Can be specified multiple times, or can be a quoted space delimited list of hostgroups
+        hostgroup can't be specified with a hostname template
+
+-k      sticky acknowledge
+        denotes an acknowledge command should be 'sticky'
+
+-n      notify acknowledge
+        denotes an acknowledge command should be notify
+
+-o      override
+        Denotes that hostname format checks should be ignored
+
+-p      parity
+        a string, eith "odd" or "even"
+        Only valid when specifying a hostname template - requires -x and -y
+
+-q      quiet
+        Denotes that output should be limited
+
+-Q      query name
+        the name of the predefined LQL query
+        Requires ngctlq.conf 
+
+-r      command retries
+        integer, number of times to retry sending a command to Nagios
+
+-R      validate retries 
+        integer, number of times to try validating a command was successful
+        this applies after each try as specified by -r 
+
+-s      service description
+        a string, the service description (aka name). Can be specified multiple times, or can be a quoted space delimited list of services
+
+-S      state
+        either an integer between 0 and 3, or a string - one of OK WARN CRIT UNK (ok warn crit unk)
+        only valid in query mode
+
+-t      test
+        denotes test mode.  No commands will be executed - used for checking parameter validity
+
+-u      username
+        a string, the username to use in query mode
+
+-v      verbose
+        denotes output should be verbose
+
+-V      very verbose
+        denotes output should be very verbose
+
+-x      range start
+        an integer, the start number for a hostname template. Requires -y
+
+-y      range end
+        an integer, the end number for a hostname template. Requires -x
+
+-z      validate pause
+        a number (float), the time to pause after sending a command before trying to validate it's success
+
+-Z      command pause
+        a number (float), the time to pause after validating a command before trying to send the next command
+
+
+--config    override query config filename
+            a string, a custom filename to override default ngctlq.conf file
+            
+--custom    custom query values
+            a space delimited string of values to be used in query mode for predefined LQL queries
+            * see the included ngctlq.conf file for more details
+
+--debug     debug level
+            an integer, sets the debug output level. 1 is some, 2 is all
+
+--devmode   enable devmode
+            partially implemented - for testing locally without a Nagios server.
+            see the script for more information
+
+--help      help
+            show help.  Currently not up to date
+
+--list      list queries
+            in query mode, list configured predefined queries
+
+--validate  validate query config file
+            validtaes that the specified ngctlq.conf file is valid
+
+
+
+Specifying hostnames
+
+There are 3 ways to specify hostnames (although methods 1 and 2 can be combined however you like)
+    1 Specify a hostname using the -h parameter.  You can specify this multiple time, or specify multiple hostnames by quoting a space delimtered list. eg:
+        -h=prodapiserver01
+        -h=prodapiserver01 -h=prodapiserver02 -h=prodapiserver03
+        -h='prodapiserver01 prodapiserver02 prodapiserver03'
+
+    2 Specify a Nagios hostgroup using the -H parameter.  You can specify this multiple time, or specify multiple hostgroups by quoting a space delimtered list. eg:
+        -H=redhat-servers
+        -H=redhat-servers -H=centos-servers
+        -H='redhat-servers centos-servers'
+
+    3 Specify a hostname template* using the -h parameter and a range of numbers to append to the template.  You may only specify 1 hostname template and 1 range.  eg:
+        -h=prodwebserver -x=1 -y=10
+            generates a list of hostnames like this: prodwebserver01 prodwebserver02 prodwebserver03 ... prodwebserver10
+        -h=prodwebserver -x=1 -y=10 -p=odd
+            generates a list of hostnames like this: prodwebserver01 prodwebserver03 prodwebserver05 ... prodwebserver09
+        -h=prodwebserver -x=1 -y=10 -p=even
+            generates a list of hostnames like this: prodwebserver02 prodwebserver04 prodwebserver06 ... prodwebserver10
+
+        * this assumes the naming convention of servers requires hostname to end in a 2 or more digit number (currently a requirement #todolist)
+
+You can mix -h with -H as many times as you like as long as you aren't trying to use the template/range method. If you're using the template/range method you can only specify each parameter once.
+
+You can't...
+    -h=prodapiserver01 -h=prodwebserver -x=1 -y=10
+    This is not currently supported as it tries to use a specific hostname as well as a template and range
+
+    -H=redhat-servers -h=prodwebserver -x=1 -y=10
+    This is not currently supported as it tries to use a hostgroup as well as a template and range
+
+    -h=prodwebserver -h=prodapiserver -x=1 -y=10
+    This is not currently supported as it tries to use more than 1 template
+
+You can...
+    -h='prodapiserver01 prodapiserver02' -H=prod-webservers
+
+
+ngctl will remove duplicate hostnames from the list of hostnames, so if you're mixing hostgroups and hostnames only 1 downtime will be created for each host.
+
+
+
+Specifying the time frame
+
+Start time
+    If you want the start time of the downtime entry to be "now", don't specify a start time - "now" will be assumed
+    Use the -b parameter to specify a start time in the future.  Values must be compatible with the GNU/linux 'date' command
+
+End time
+    To specify a duration rather than a specific end time, use -d for minutes and/or -D for hours
+    To specify a specific end time, use the -e parameter.  Values must be compatible with the GNU/linux 'date' command
+    You can't specify an end time and a duration as it doesn't make sense
+
+    Some valid examples for -b and -e are:
+        -b='Tomorrow 10am'
+        -b='Wednesday 10am'
+        -b='2019-03-05 10am'
+        -e='tomorrow'
+            this will add 24 hours to the current time
+        -e='next week'
+            this will add 7 days to the current time
+
+    Using a duration:
+        -d=30
+            end time is 30 minutes after the start time
+        -D=1
+            end time is 1 hour after the start time
+        -d=30 -D=1
+            end time is 1 hour and 30 minutes after the start time 
+
+    Valid examples:
+        -d=30
+            set downtime starting now for 30 minutes
+        -d=30 -D=1
+            set downtime starting now for 1 hour and 30 minutes
+        -b='Tomorrow 10am' -D=1
+            set downtime starting tomorrow at 10am for 1 hour
+        -b='Tomorrow 10am' -e='Tomorrow 11am'
+            set downtime starting tomorrow at 10am and ending tomorrow at 11am
