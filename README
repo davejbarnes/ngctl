@@ -68,7 +68,7 @@ Not all parameters require a value.
         denotes an acknowledge command should be notify
 
 -o      override
-        Denotes that hostname format checks should be ignored
+        Denotes that hostname format checks should be ignored. Also disables templates and invalidates -x -y -p parameters
 
 -p      parity
         a string, eith "odd" or "even"
