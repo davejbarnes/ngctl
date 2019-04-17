@@ -31,7 +31,7 @@ ngctl currently works in seven modes
 
 Parameters
 
-Parameters which take a value must be specified in the following way: -a=value
+Parameters which take a value must be specified in the following way: -a=value  OR  -a='value1 value2'
 Not all parameters require a value.
 
 
@@ -54,7 +54,7 @@ Not all parameters require a value.
 
 -h      hostname or hostname template
         a string which begins with the configured prefixes. Can be specified multiple times for a hostname, or can be a quoted space delimited list of hostnames
-        If no number is specified it will be treated as a hostname template, and can only be specified once
+        If the hostname doesn't end with a number it will be treated as a hostname template, and can only be specified once
         hostname templates require -x and -y and optionally -p may be specified
 
 -H      hostgroup name
@@ -96,7 +96,7 @@ Not all parameters require a value.
         only valid in query mode
 
 -t      test
-        denotes test mode.  No commands will be executed - used for checking parameter validity
+        denotes test mode.  No commands will be executed - used for checking parameter interpretation and validity
 
 -u      username
         a string, the username to use in query mode
