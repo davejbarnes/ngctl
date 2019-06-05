@@ -167,6 +167,7 @@ There are 3 ways to specify hostnames (although methods 1 and 2 can be combined 
             generates a list of hostnames like this: prodwebserver02 prodwebserver04 prodwebserver06 ... prodwebserver10
 
         * this assumes the naming convention of servers requires hostname to end in a 2 or more digit number (currently a requirement #todolist)
+        * use -o to override this hostname check if you aren't specifying a range
 
 You can mix -h with -H as many times as you like as long as you aren't trying to use the template/range method. If you're using the template/range method you can only specify each parameter once.
 
@@ -225,3 +226,44 @@ End time
             set downtime starting tomorrow at 10am for 1 hour
         -b='Tomorrow 10am' -e='Tomorrow 11am'
             set downtime starting tomorrow at 10am and ending tomorrow at 11am
+
+
+
+Specifying services
+
+Services are specified by the -s parameter.  You can specify a single service or multiple services; you can specify -s multiple times or you can specify more than one service with -s either comma delimitered or quoted space delimited.
+
+    Valid examples
+        -s=log_age
+        -s='app_log_age app_log_backup'
+        -s=app_log_age,app_log_backup
+
+
+
+Tuning command and query speed 
+
+This does not apply to query mode.
+
+Depending on the load on your Nagios server, you might need to throttle how fast commands and queries are made, and how many times to retry. Defaults are set in the script for the parameters which control this behaviour.
+
+    Retries
+        There are two retry paramaters, -r specifies the number of times to send a command, and -R specifies the number of times to try and validate each command was successful. For example
+
+        -r=3 -R=2
+
+        would execute the command, and try twice to validate it was successful.  If not successful it will repeat the command and validations up to 3 times before failing.
+
+
+    Throttling
+
+        There are two parameters which affect the speed commands and queries are sent.
+        -z specifies the amount of time to pause after a command has been sent before trying to validate it's success, and how long to wait before trying to validate again.
+        -Z specifies the amount of time to pause before sending the next command, after the previous command/validation has completed.
+
+        -z=0.5 -Z=1
+
+        would send the initial command and then pause for 0.5 seconds before querying to validate success, and a further 0.5 seconds before trying to validate again. Once validation is complete (failed or not), ngctl will then pause for 1 second before sending the next command.
+
+Both the retry values and the throttle values work together if you need to tune for your install and your failure tolerance.
+
+
