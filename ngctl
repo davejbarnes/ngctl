@@ -15,7 +15,6 @@
 
 
 
-
 # First things first. Do we want debug?
 st_debug=0
 
@@ -37,8 +36,9 @@ env_server_prefix_regex='guea|nps|fake'             # valid prefixes for server 
 ngq_filename=/etc/nagios/ngctlq.conf                # config file name for query mode
 
 
+
 # For development purposes set this.  Functions that require interaction with a functioning
-# Nagios server will instead return fake data.
+# Nagios server will instead return fake data.  Partially implemented.
 #   Set to 0 = don't fake data
 #   Set to 1 = return a successful response
 #   Set to 2 = return an unsuccessful response
@@ -126,8 +126,6 @@ out (){
     esac
 }
 
-
-#  Find which mode we are working in
 case "$1" in 
     down)
         ng_mode=down
@@ -182,7 +180,6 @@ out debug "Got parameters: $@"
 
 # Set all "value provided" flags to 0; these are set when they are detected but not yet validated
 #                          Used for reporting errors back to the user (close but no cigar)
-#                          Still not implmented for help. If not used throughout may remove later.
 fnd_hostname=0
 fnd_hosttemplate=0
 fnd_hostgroup=0
@@ -294,7 +291,7 @@ htype () {
     # Inputs:
     #   $1 string to be tested
 
-    # Return codes: (no idea why I picked these, should probably review)
+    # Return codes:
     #   1   string is a hostname
     #   2   string is a hostname template
     #   99  string doesn't match prefix constraint
@@ -336,8 +333,7 @@ htype () {
     fi
 }
 
-# isin() takes a string and a string of space delimited strings
-            # I'll rewrite some of this to use 'proper' arrays
+# isin() takes a string and an "array" - a string of space delimited strings
 isin (){
 
     # Inputs:
@@ -366,10 +362,10 @@ isin (){
 dedupe () {
 
     # Inputs:
-    # $1 String of space delimted values
+    # $1 List of items
 
     # Ouputs:
-    # $dedupe_result is set to depuded space delimted string
+    # $dedupe_result is set to depuded input List
 
     # Return codes:
     # 0 no duplicates found 
@@ -402,7 +398,7 @@ dedupe () {
 datefunc () {
 
     # Inputs:
-    #   $1      type of request - hours or minutes output a value in seconds, absolute and now output unix timestamps
+    #   $1      type of request - hours and minutes output a value in seconds, absolute and now output unix timestamps
     #   $2      value to work on, either an integer or string to be converted. None for 'now'
 
     # Return coes:
@@ -484,9 +480,6 @@ getHostsbygroup (){
 }
 
 # showHelp() does just that
-
-        ###  This really needs updating  ###
-
 showHelp (){
     echo -e "$fg_bold$fg_underline$fg_green""ngctl help$fbg_reset"
     echo -e ""
@@ -544,14 +537,14 @@ showHelp (){
         echo -e "                  Also please make use of 'out debug' and 'out DEBUG' for troubleshooting"
     fi
     echo -e "$fg_yellow""Note: duplicate hostnames and/or service names are discarded ('-h=prodserver01 -H=prodservers' matches 'prodserver01' once) $fbg_reset"
-    echo -e "$fg_yellow""Note: currently it is assumed all hostnames adhere to a set prefix ($env_server_prefix_regex) and 2-3 digits suffix  (eg. prodsomething01, drotherthing22)$fbg_reset"
+    echo -e "$fg_yellow""Note: currently it is assumed all hostnames adhere to a set prefix ($env_server_prefix_regex) and 2-3 digits suffix  (eg. gueasomething01, npsotherthing22)$fbg_reset"
 }
 
 # End of functions
 
-# Now we need to get all the command line parameters.  To match them we use a 'if ... fi' rather than a 'case ... esac' as 
-# we're looking for different length prefixes (and it's easier, I think).  We also need to support different rules for various parameters.  
-# This takes quite a lot of scripting compared to using 'getopts'.
+# Now we need to get all the command line parameters.  To match them we need to use a 'if ... fi' rather than a 'case ... esac' as 
+# we're looking for different length prefixes.  We also need to support different rules for various parameters.  This takes quite a
+# lot of scripting.
 
 # First get switches which need no value
 sw_count=$#
@@ -561,7 +554,7 @@ fi
 
 for switch in "$@"
 do
-    if [ "${switch}" == "--help" ]; then
+    if [ "$switch" == "--help" ]; then
         out DEBUG "Found --help"
         out DEBUG "Showing help then quitting"
         showHelp
@@ -1063,7 +1056,6 @@ out debug "comment             [$ng_comment]"
 out debug "rangex              [$ng_rangex]"
 out debug "rangey              [$ng_rangey]"
 out debug "parity              [$ng_parity]"
-out debug "filters             [$ng_filters]"
 out debug "query name          [$ng_query_name]"
 out debug "state               [$ng_state]"
 out debug "config              [$ng_config_filename]"
@@ -1088,7 +1080,7 @@ out debug "------------------------------------------------------"
 
 # Time to do some error checking
 # Lets add up the various groups - we can then quickly check what's valid
-# This is why we set the "found" values to 1, 2, 4, 8 etc
+# This is why we set the "flg" values to 1, 2, 4, 8 etc
 
 errchk_times=$(($flg_minutes + $flg_hours + $flg_begintime + $flg_endtime))
 errchk_targets=$(($flg_hostname + $flg_hosttemplate + $flg_hostgroup))
@@ -1724,8 +1716,8 @@ if [ "$ng_mode" != "query" ]; then      # this should cover all use cases (send 
                     lql_post_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nFilter: state >= 1\nFilter: acknowledged = 1\nColumns: acknowledgement_type\n"
                 else
                     ls_command="COMMAND [$(date +%s)] ACKNOWLEDGE_HOST_PROBLEM;$targethost;$cmd_sticky;$cmd_notify;$cmd_persistent;$cmd_user;$cmd_comment\n"
-                    lql_pre_query="GET hosts\nFilter: host_name = $targethost\nFilter: state >= 1\nColumns: host_name\n"
-                    lql_post_query="GET hosts\nFilter: host_name = $targethost\nFilter: state >= 1\nFilter: acknowledged = 1\nColumns: acknowledgement_type\n"
+                    lql_pre_query="GET hosts\nFilter: name = $targethost\nFilter: state >= 1\nColumns: host_name\n"
+                    lql_post_query="GET hosts\nFilter: name = $targethost\nFilter: state >= 1\nFilter: acknowledged = 1\nColumns: acknowledgement_type\n"
                 fi
 
             elif [ $ng_mode == discheck ]; then
@@ -1736,8 +1728,8 @@ if [ "$ng_mode" != "query" ]; then      # this should cover all use cases (send 
                     lql_post_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nFilter: checks_enabled = 0\nColumns: checks_enabled\n"
                 else
                     ls_command="COMMAND [$(date +%s)] DISABLE_HOST_CHECK;$targethost\n"
-                    lql_pre_query="GET hosts\nFilter: host_name = $targethost\nColumns: host_name\n"
-                    lql_post_query="GET hosts\nFilter: host_name = $targethost\nFilter: state >= 1\nFilter: checks_enabled = 0\nColumns: checks_enabled\n"
+                    lql_pre_query="GET hosts\nFilter: name = $targethost\nColumns: host_name\n"
+                    lql_post_query="GET hosts\nFilter: name = $targethost\nFilter: checks_enabled = 0\nColumns: checks_enabled\n"
                 fi
 
             elif [ $ng_mode == encheck ]; then
@@ -1748,8 +1740,8 @@ if [ "$ng_mode" != "query" ]; then      # this should cover all use cases (send 
                     lql_post_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nFilter: checks_enabled = 1\nColumns: checks_enabled\n"
                 else
                     ls_command="COMMAND [$(date +%s)] ENABLE_HOST_CHECK;$targethost\n"
-                    lql_pre_query="GET hosts\nFilter: host_name = $targethost\nColumns: host_name\n"
-                    lql_post_query="GET hosts\nFilter: host_name = $targethost\nFilter: state >= 1\nFilter: checks_enabled = 1\nColumns: checks_enabled\n"
+                    lql_pre_query="GET hosts\nFilter: name = $targethost\nColumns: host_name\n"
+                    lql_post_query="GET hosts\nFilter: name = $targethost\nFilter: checks_enabled = 1\nColumns: checks_enabled\n"
                 fi
 
             elif [ $ng_mode == disnotif ]; then
@@ -1760,8 +1752,8 @@ if [ "$ng_mode" != "query" ]; then      # this should cover all use cases (send 
                     lql_post_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nFilter: notifications_enabled = 0\nColumns: notifications_enabled\n"
                 else
                     ls_command="COMMAND [$(date +%s)] DISABLE_HOST_NOTIFICATIONS;$targethost\n"
-                    lql_pre_query="GET hosts\nFilter: host_name = $targethost\nColumns: host_name\n"
-                    lql_post_query="GET hosts\nFilter: host_name = $targethost\nFilter: state >= 1\nFilter: notifications_enabled = 0\nColumns: notifications_enabled\n"
+                    lql_pre_query="GET hosts\nFilter: name = $targethost\nColumns: host_name\n"
+                    lql_post_query="GET hosts\nFilter: name = $targethost\nFilter: notifications_enabled = 0\nColumns: notifications_enabled\n"
                 fi
 
             elif [ $ng_mode == ennotif ]; then
@@ -1772,8 +1764,8 @@ if [ "$ng_mode" != "query" ]; then      # this should cover all use cases (send 
                     lql_post_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nFilter: notifications_enabled = 1\nColumns: notifications_enabled\n"
                 else
                     ls_command="COMMAND [$(date +%s)] ENABLE_HOST_NOTIFICATIONS;$targethost\n"
-                    lql_pre_query="GET hosts\nFilter: host_name = $targethost\nColumns: host_name\n"
-                    lql_post_query="GET hosts\nFilter: host_name = $targethost\nFilter: state >= 1\nFilter: notifications_enabled = 1\nColumns: notifications_enabled\n"
+                    lql_pre_query="GET hosts\nFilter: name = $targethost\nColumns: host_name\n"
+                    lql_post_query="GET hosts\nFilter: name = $targethost\nFilter: notifications_enabled = 1\nColumns: notifications_enabled\n"
                 fi
 
             fi
