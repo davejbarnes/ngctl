@@ -204,6 +204,7 @@ fnd_validation_retry=0
 fnd_config_filename=0
 fnd_sticky=0
 fnd_notify=0
+fnd_dt_id=0
 
 # Set all "value set" flags to 0; these are set when valid values have been found
 # When set, we use binary decimals for some so we can do easier checking later
@@ -230,6 +231,7 @@ flg_username=0          # 1 when set
 flg_custom=0            # 1 when set
 flg_retry=0             # 1 when set
 flg_validation_retry=0  # 1 when set
+flg_dt_id=0             # 1 when set
 flg_error=0             # not a parameter, but we need it later
 
 # These are set to 1 when detected as they take no value - they're there or they're not
@@ -667,7 +669,6 @@ do
             fi
         else
             out DEBUG "Found and ignoring another -d"
-
         fi
 
     elif [ "${switch:0:2}" == "-D" ]; then
@@ -691,7 +692,6 @@ do
             fi
         else
             out DEBUG "Found and ignoring another -D"
-
         fi
 
     elif [ "${switch:0:2}" == "-h" ]; then
@@ -733,7 +733,6 @@ do
                 ng_error="$ng_error\n\tInvalid value of -h ($value) - code $returned_htype"
                 flg_error=1
             fi
-
         done
         
     elif [ "${switch:0:2}" == "-H" ]; then
@@ -796,6 +795,7 @@ do
         else
             out DEBUG "Found and ignoring another -x"
         fi
+
     elif [ "${switch:0:2}" == "-y" ]; then
         fnd_rangey=1
         out DEBUG "Found -y with value '${switch:3}'"
@@ -816,6 +816,7 @@ do
         else
             out DEBUG "Found and ignoring another -y"
         fi
+
     elif [ "${switch:0:2}" == "-p" ]; then
         fnd_parity=1
         out DEBUG "Found -p with value '${switch:3}'"
@@ -832,6 +833,24 @@ do
         else
             out DEBUG "Found and ignoring another -p"
         fi
+
+    elif [ "${switch:0:2}" == "-i" ]; then
+        fnd_dt_id=1
+        out DEBUG "Found -i with value '${switch:3}'"
+        dcheck=${switch:3}
+        if [ ${#ng_dt_id} -eq 0 ]; then
+            echo ${switch:3} | grep -P "^\d{1,16}$" &> /dev/null
+            if [ $? -eq 0 ]; then
+                out DEBUG "Adding ${switch:3} dt_id"
+                ng_dt_id="${switch:3}"
+                flg_dt_id=1
+            else
+                ng_error="$ng_error\n\tInvalid value '${switch:3}' for -i"
+            fi
+        else
+            out DEBUG "Found and ignoring another -i"
+        fi
+
     elif [ "${switch:0:2}" == "-z" ]; then
         fnd_sleepz=1
         out DEBUG "Found -z with value '${switch:3}'"
@@ -853,8 +872,8 @@ do
             fi
         else
             out DEBUG "Found and ignoring another -z"
-
         fi
+
     elif [ "${switch:0:2}" == "-Z" ]; then
         fnd_sleepz=1
         out DEBUG "Found -Z with value '${switch:3}'"
@@ -876,13 +895,13 @@ do
             fi
         else
             out DEBUG "Found and ignoring another -Z"
-
         fi
+
     elif [ "${switch:0:2}" == "-r" ]; then
         fnd_retry=1
         out DEBUG "Found -r with value '${switch:3}'"
         rcheck=${switch:3}
-        if [ $ng_retry -eq 2 ]; then
+        if [ $ng_retry -eq 5 ]; then  ## ng_retry is set to 5 as default... smells. "5" should be a var
             echo ${switch:3} | grep -P "\d{0,1}$" &> /dev/null
             if [ $? -eq 0 ]; then
                 if [ ${#rcheck} -gt 10 ]; then
@@ -899,13 +918,13 @@ do
             fi
         else
             out DEBUG "Found and ignoring another -r"
-
         fi
+
     elif [ "${switch:0:2}" == "-R" ]; then
         fnd_validation_retry=1
         out DEBUG "Found -R with value '${switch:3}'"
         Rcheck=${switch:3}
-        if [ $ng_validation_retry -eq 10 ]; then
+        if [ $ng_validation_retry -eq 3 ]; then ## this also smells. "3" should be a var
             echo ${switch:3} | grep -P "\d{0,1}$" &> /dev/null
             if [ $? -eq 0 ]; then
                 if [ ${#Rcheck} -gt 10 ]; then
@@ -922,7 +941,6 @@ do
             fi
         else
             out DEBUG "Found and ignoring another -R"
-
         fi
 
     elif [ "${switch:0:2}" == "-S" ]; then
@@ -978,7 +996,6 @@ do
             out DEBUG "Found -u with value '$ng_username'"
         fi
 
-
     elif [ "$switch" == "down" ] || [ "$switch" == "ack" ] || [ "$switch" == "up" ] || [ "$switch" == "query" ]; then
         ng_mode=$switch
         # I think this is duplicating a much earlier check ^^^^  should probably merge with the following
@@ -993,7 +1010,6 @@ do
     else
         out err "Ignoring unknown parameter $switch"
     fi
-
 done
 
 if [ -r ./devkit/debughacks.inc ]; then
@@ -1039,6 +1055,8 @@ if [ $err_fatal -eq 1 ]; then
         out ERR "Failed access checks âœ—"
         exit 5
     fi
+else
+    out debug "Livestatus pipe and socket access ok"
 fi
 
 out debug "------------------------------------------------------"
@@ -1062,6 +1080,7 @@ out debug "custom values       [${ng_custom[@]}]"
 out debug "throttle            [$ng_sleepz]"
 out debug "validation pause    [$ng_sleepZ]"
 out debug "command retries     [$ng_retry]"
+out debug "downtime id         [$ng_dt_id]"
 out debug "validation retries  [$ng_validation_retry]"
 out debug "Switches:"
 out debug "-o override         [$flg_override]"
@@ -1567,8 +1586,8 @@ out debug "Finished checking for generic errors"
 out debug "------------------------------------------------------"
 
 
-if [ "$ng_mode" != "query" ]; then      # this should cover all use cases (send and validate a command) 
-                                        # except queries which are handled seperately
+if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "up" ]; then      # this should cover all use cases (send and validate a command) 
+                                                                  # except query and up modes which are handled seperately
 
     # Mode specific error checking - all but query mode
 
@@ -1691,6 +1710,8 @@ if [ "$ng_mode" != "query" ]; then      # this should cover all use cases (send 
     for targethost in $cmd_targets; do
         if [ $flg_service -eq 0 ] && [ "$cmd_services" == "" ]; then
             # a bit of a fudge, but it almost halves the amount of code needed
+            # This works because $flg_service is 0 and so the following condition
+            # checks always go to _HOST_ command sections
             cmd_services='at_least_one_loop_for_host_only_downtimes'
         fi
         for service in $cmd_services; do
@@ -1814,7 +1835,7 @@ if [ "$ng_mode" != "query" ]; then      # this should cover all use cases (send 
                                         fi
                                         flg_command_success=1
                                     else
-                                        echo -e $lql_result'\n'
+                                        echo -e $lql_result
                                         flg_command_success=1
                                     fi
                                 else
@@ -2387,5 +2408,50 @@ elif [ "$ng_mode" == "query" ]; then
     # End of query mode (and several more... tbc)
     # --------------------------------------------------------------------------------------
 
+elif [ "$ng_mode" == "up" ]; then
+    # echo Up mode goes here
+    up_err=0
 
+    if [ $fnd_dt_id -eq 0 ]; then
+        out err "up mode:"
+        out err '    No downtime ID found'
+        up_err=1
+    fi
+
+    if [ $fnd_begintime -ne 0 ] || [ $fnd_comment -ne 0 ] || [ $fnd_config_filename -ne 0 ] ||
+    [ $fnd_custom -ne 0 ] || [ $fnd_endtime -ne 0 ] || [ $fnd_hostgroup -ne 0 ] || [ $fnd_hostname -ne 0 ] ||
+    [ $fnd_hosttemplate -ne 0 ] || [ $fnd_hours -ne 0 ] || [ $fnd_minutes -ne 0 ] || [ $fnd_notify -ne 0 ] ||
+    [ $fnd_parity -ne 0 ] || [ $fnd_rangex -ne 0 ] || [ $fnd_rangey -ne 0 ] || [ $fnd_service -ne 0 ] ||
+    [ $fnd_state -ne 0 ] || [ $fnd_sticky -ne 0 ] || [ $fnd_username -ne 0 ]; then
+        if [ $up_err -eq 0 ]; then out err "up mode:"; fi
+        out err '    Invalid parameters specified: up mode requires only -i (downtime entry ID)'
+        out err '    Tuning parameters may be specified, but are not implemented yet'
+        up_err=1
+    fi
+
+    if [ $up_err -eq 1 ]; then exit 12; fi
+    
+    out debug We have downtime entry $ng_dt_id
+
+    # either /should/ work
+    ls_command="DEL_HOST_DOWNTIME;$ng_dt_id"
+    out DEBUG sending: $ls_command
+    echo -e "$ls_command" $(date +%s) > $env_cmdpipe
+    
+    ls_command="DEL_SVC_DOWNTIME;$ng_dt_id"
+    out DEBUG sending: $ls_command
+    echo -e "$ls_command" $(date +%s) > $env_cmdpipe
+    
+    # pause, then query to see if dt still exists
+    sleep $ng_sleepZ
+
+    lql_post_query="GET downtimes\Filter: id = $ng_dt_id\Columns: id\n"
+    lql_result=$(echo -e "$lql_post_query" | unixcat $env_livestatus)
+    echo Result is $lql_result
+    
+    if [ '$lql_result' != '$ng_dtid' ]; then
+        out info "Downtime removed"
+    else
+        out err "Downtime not removed"
+    fi
 fi
