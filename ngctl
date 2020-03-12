@@ -2437,15 +2437,18 @@ elif [ "$ng_mode" == "up" ]; then
     ls_command="DEL_HOST_DOWNTIME;$ng_dt_id"
     out DEBUG sending: $ls_command
     echo -e "$ls_command" $(date +%s) > $env_cmdpipe
+    
     ls_command="DEL_SVC_DOWNTIME;$ng_dt_id"
     out DEBUG sending: $ls_command
     echo -e "$ls_command" $(date +%s) > $env_cmdpipe
+    
     # pause, then query to see if dt still exists
+    sleep $ng_sleepZ
 
     lql_post_query="GET downtimes\Filter: id = $ng_dt_id\Columns: id\n"
     lql_result=$(echo -e "$lql_post_query" | unixcat $env_livestatus)
     echo Result is $lql_result
-    #lql_result="" ## just to prove no return works
+    
     if [ '$lql_result' != '$ng_dtid' ]; then
         out info "Downtime removed"
     else
