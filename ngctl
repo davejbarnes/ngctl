@@ -1736,7 +1736,7 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "up" ]; then      # this should 
                     lql_post_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nFilter: state >= 1\nFilter: acknowledged = 1\nColumns: acknowledgement_type\n"
                 else
                     ls_command="COMMAND [$(date +%s)] ACKNOWLEDGE_HOST_PROBLEM;$targethost;$cmd_sticky;$cmd_notify;$cmd_persistent;$cmd_user;$cmd_comment\n"
-                    lql_pre_query="GET hosts\nFilter: name = $targethost\nFilter: state >= 1\nColumns: host_name\n"
+                    lql_pre_query="GET hosts\nFilter: name = $targethost\nFilter: state >= 1\nColumns: name\n"
                     lql_post_query="GET hosts\nFilter: name = $targethost\nFilter: state >= 1\nFilter: acknowledged = 1\nColumns: acknowledgement_type\n"
                 fi
 
@@ -1748,7 +1748,7 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "up" ]; then      # this should 
                     lql_post_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nFilter: checks_enabled = 0\nColumns: checks_enabled\n"
                 else
                     ls_command="COMMAND [$(date +%s)] DISABLE_HOST_CHECK;$targethost\n"
-                    lql_pre_query="GET hosts\nFilter: name = $targethost\nColumns: host_name\n"
+                    lql_pre_query="GET hosts\nFilter: name = $targethost\nColumns: name\n"
                     lql_post_query="GET hosts\nFilter: name = $targethost\nFilter: state >= 1\nFilter: checks_enabled = 0\nColumns: checks_enabled\n"
                 fi
 
@@ -1760,7 +1760,7 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "up" ]; then      # this should 
                     lql_post_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nFilter: checks_enabled = 1\nColumns: checks_enabled\n"
                 else
                     ls_command="COMMAND [$(date +%s)] ENABLE_HOST_CHECK;$targethost\n"
-                    lql_pre_query="GET hosts\nFilter: name = $targethost\nColumns: host_name\n"
+                    lql_pre_query="GET hosts\nFilter: name = $targethost\nColumns: name\n"
                     lql_post_query="GET hosts\nFilter: name = $targethost\nFilter: state >= 1\nFilter: checks_enabled = 1\nColumns: checks_enabled\n"
                 fi
 
@@ -1772,7 +1772,7 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "up" ]; then      # this should 
                     lql_post_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nFilter: notifications_enabled = 0\nColumns: notifications_enabled\n"
                 else
                     ls_command="COMMAND [$(date +%s)] DISABLE_HOST_NOTIFICATIONS;$targethost\n"
-                    lql_pre_query="GET hosts\nFilter: name = $targethost\nColumns: host_name\n"
+                    lql_pre_query="GET hosts\nFilter: name = $targethost\nColumns: name\n"
                     lql_post_query="GET hosts\nFilter: name = $targethost\nFilter: state >= 1\nFilter: notifications_enabled = 0\nColumns: notifications_enabled\n"
                 fi
 
@@ -1784,7 +1784,7 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "up" ]; then      # this should 
                     lql_post_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nFilter: notifications_enabled = 1\nColumns: notifications_enabled\n"
                 else
                     ls_command="COMMAND [$(date +%s)] ENABLE_HOST_NOTIFICATIONS;$targethost\n"
-                    lql_pre_query="GET hosts\nFilter: name = $targethost\nColumns: host_name\n"
+                    lql_pre_query="GET hosts\nFilter: name = $targethost\nColumns: name\n"
                     lql_post_query="GET hosts\nFilter: name = $targethost\nFilter: state >= 1\nFilter: notifications_enabled = 1\nColumns: notifications_enabled\n"
                 fi
 
