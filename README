@@ -252,7 +252,7 @@ Services are specified by the -s parameter.  You can specify a single service or
 
 Tuning command and query speed 
 
-This does not apply to query mode.
+This does not apply to query, rd or up modes.
 
 Depending on the load on your Nagios server, you might need to throttle how fast commands and queries are made, and how many times to retry. Defaults are set in the script for the parameters which control this behaviour.
 
