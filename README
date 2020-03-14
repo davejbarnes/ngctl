@@ -3,6 +3,7 @@ README
 ngctl was born out of a need to quickly and easily set a downtime on an alerting host without having to navigate a web interface.  That morphed into a bigger project to allow setting more specific downtime entries such as a specific service on a specific host, and maybe for a specific time in the future.
 
 Over time this grew to also supporting acknowledging problems, and enabling or disabling checks and notifications.
+It now supports querying Nagios via a predefined set of queries in a configuration file (ngctlq.conf) and also removing downtime entries by ID or by using some or all of the paramaters used to add the downtime entry.
 
 It's always a work in progress, but it does work.
 
