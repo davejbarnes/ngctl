@@ -241,12 +241,11 @@ End time
 
 Specifying services
 
-Services are specified by the -s parameter.  You can specify a single service or multiple services; you can specify -s multiple times or you can specify more than one service with -s either comma delimitered or quoted space delimited.
+Services are specified by the -s parameter.  You can specify a single service or multiple services; you can specify -s multiple times or you can specify more than one service with -s quoted space delimited.
 
     Valid examples
         -s=log_age
         -s='app_log_age app_log_backup'
-        -s=app_log_age,app_log_backup
 
 
 
