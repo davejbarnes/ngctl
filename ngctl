@@ -1754,7 +1754,7 @@ fi
 out debug "Finished checking for generic errors"
 out debug "------------------------------------------------------"
 
-# Any referecnes to time aren't valid for these modes
+# Any references to time are only valid for these modes
 if [ $ng_mode != down ] && [ $ng_mode != up ] && [ $ng_mode != query ]; then
     ng_time_check=$(( $flg_begintime + $flg_endtime + $flg_minutes + $flg_hours ))
     out DEBUG "Time check is $ng_time_check"
