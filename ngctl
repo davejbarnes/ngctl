@@ -663,7 +663,7 @@ removeDowntime(){
     lql_result=$(echo -e "$lql_post_query" | unixcat $env_livestatus)
     
     if [ '$lql_result' != '$ng_dtid' ]; then
-        out ok "Downtime ID-$ng_dt_id removed\n"
+        out ok "Downtime $ng_dt_id removed\n"
     else
         ng_error="$ng_error\nDowntime ID-$ng_dt_id not removed"
         flg_error=1
@@ -1157,7 +1157,6 @@ do
             if [ $? -eq 1 ]; then
                 ng_error="$ng_error\n\tInvalid value '${switch:7}' for --type"
                 flg_error=1
-                #out err What?
             fi
         fi
 
@@ -1170,7 +1169,9 @@ do
         echo "Catch-all for ok" &> /dev/null
 
     else
-        out err "Ignoring unknown parameter $switch"
+        # Change to previous behaviour where unrecognised parameters where ignored
+        ng_error="$ng_error\n\tUnknown parameter $switch"
+        flg_error=1
     fi
 done
 
@@ -1570,40 +1571,40 @@ if [ $ng_mode == down ]; then
                 datefunc unix $cmd_endtime
                 out debug "End:   $func_time"
 
-    elif [ $ng_mode == query ]; then
+elif [ $ng_mode == query ]; then
 
-        out debug Checking times in query context
+    out debug Checking times in query context
 
-        if [ $flg_begintime -gt 0 ]; then
-            datefunc absolute "$ng_begintime"
-            if [ $? -eq 0 ]; then 
-                cmd_starttime=$func_time
-            else
-                out ERR "Something has gone horribly wrong"; exit 1
-            fi
+    if [ $flg_begintime -gt 0 ]; then
+        datefunc absolute "$ng_begintime"
+        if [ $? -eq 0 ]; then 
+            cmd_starttime=$func_time
+        else
+            out ERR "Something has gone horribly wrong"; exit 1
         fi
+    fi
 
-        if [ $fnd_endtime -gt 0 ]; then
-            datefunc absolute "$ng_endtime"
-            if [ $? -eq 0 ]; then 
-                cmd_endtime=$func_time
-            else
-                out ERR "Something has gone horribly wrong"; exit 1
-            fi
+    if [ $fnd_endtime -gt 0 ]; then
+        datefunc absolute "$ng_endtime"
+        if [ $? -eq 0 ]; then 
+            cmd_endtime=$func_time
+        else
+            out ERR "Something has gone horribly wrong"; exit 1
         fi
+    fi
 
-        if [ $fnd_hours -gt 0 ]; then
-            ng_error="$ng_error\n\tHours is not valid in query mode"
-            flg_error=1
-        fi
+    if [ $fnd_hours -gt 0 ]; then
+        ng_error="$ng_error\n\tHours is not valid in query mode"
+        flg_error=1
+    fi
 
-        if [ $fnd_minutes -gt 0 ]; then
-            ng_error="$ng_error\n\tMinutes is not valid in query mode"
-            flg_error=1
-        fi
+    if [ $fnd_minutes -gt 0 ]; then
+        ng_error="$ng_error\n\tMinutes is not valid in query mode"
+        flg_error=1
+    fi
 
-        out debug "Start time if any is $cmd_starttime"
-        out debug "End time if any is $cmd_endtime"
+    out debug "Start time if any is $cmd_starttime"
+    out debug "End time if any is $cmd_endtime"
 
 fi
 
@@ -1753,6 +1754,15 @@ fi
 out debug "Finished checking for generic errors"
 out debug "------------------------------------------------------"
 
+# Any referecnes to time aren't valid for these modes
+if [ $ng_mode != down ] && [ $ng_mode != up ] && [ $ng_mode != query ]; then
+    ng_time_check=$(( $flg_begintime + $flg_endtime + $flg_minutes + $flg_hours ))
+    out DEBUG "Time check is $ng_time_check"
+    if [ $ng_time_check -gt 0 ]; then
+        flg_error=1
+        ng_error=$(echo -e "$ng_error\n\tTimes or durations are not valid for $ng_mode mode")
+    fi
+fi
 
 if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "up" ]; then  
                 # this should cover all use cases (send and validate a command) 
@@ -1765,6 +1775,11 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
         if [ $flg_comment -eq 0 ] ; then
             flg_error=1
             ng_error="$ng_error\n\tNo comment provided"
+        fi
+    else
+        if [ $flg_comment -eq 1 ] ; then
+            flg_error=1
+            ng_error="$ng_error\n\tComment not valid in $ng_mode mode"
         fi
     fi
 
@@ -1779,17 +1794,7 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
     fi
 
     if [ $ng_mode == ack ]; then
-
         out DEBUG "Beginning ACK mode checks\n"
-    
-        # Any referecnes to time aren't valid here
-        ng_time_check=$(( $flg_begintime + $flg_endtime + $flg_minutes + $flg_hours ))
-        out DEBUG "Time check is $ng_time_check"
-        if [ $ng_time_check -gt 0 ]; then
-            flg_error=1
-            ng_error=$(echo -e "$ng_error\n\tTimes or durations are not valid for 'ack' mode")
-        fi
-
         if [ ${#cmd_targets} -eq 0 ] && [ ${#cmd_services} -eq 0 ]; then
             flg_error=1
             ng_error="$ng_error\n\tNothing to acknowledge"
@@ -1799,7 +1804,6 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
         if [ $flg_error -eq 1 ]; then out err "$ng_error"; exit 1; fi
 
         out DEBUG "Finished error checking in ACK mode"
-
     fi
 
     # If generic errors or specific errors were found, report them and exit
