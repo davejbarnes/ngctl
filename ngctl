@@ -144,6 +144,11 @@ case "$1" in
         ng_mode=up
         out debug "We are in up mode"
         ;;
+
+    remove-downtime|rd)
+        ng_mode=rmdown
+        out debug "We are in remove-downtime mode"
+        ;;
     
     enable-checks|ec)
         ng_mode=encheck
@@ -205,6 +210,7 @@ fnd_config_filename=0
 fnd_sticky=0
 fnd_notify=0
 fnd_dt_id=0
+fnd_type=0
 
 # Set all "value set" flags to 0; these are set when valid values have been found
 # When set, we use binary decimals for some so we can do easier checking later
@@ -232,6 +238,7 @@ flg_custom=0            # 1 when set
 flg_retry=0             # 1 when set
 flg_validation_retry=0  # 1 when set
 flg_dt_id=0             # 1 when set
+flg_type=0              # 1 when set
 flg_error=0             # not a parameter, but we need it later
 
 # These are set to 1 when detected as they take no value - they're there or they're not
@@ -246,7 +253,8 @@ flg_list=0
 flg_validate=0
 flg_sticky=0
 flg_notify=0
-
+flg_my=0
+flg_all=0
 
 # Initialise some misc variables
 ng_error="\nValidation error(s)"
@@ -540,6 +548,139 @@ showHelp (){
     echo -e "$fg_yellow""Note: currently it is assumed all hostnames adhere to a set prefix ($env_server_prefix_regex) and 2-3 digits suffix  (eg. prodsomething01, drotherthing22)$fbg_reset"
 }
 
+# Sets flg_error to 1 if any query specific parameters are set
+noQueryParams() {
+    if [ $flg_config_filename -eq 1 ] ; then
+        flg_error=1
+        ng_error=$(echo -e "$ng_error\n\tConfig file is not valid in $ng_mode mode")
+    fi
+
+    if [ $flg_validate -eq 1 ] ; then
+        flg_error=1
+        ng_error=$(echo -e "$ng_error\n\tValidate is not valid in $ng_mode mode")
+    fi
+
+    if [ $flg_list -eq 1 ] ; then
+        flg_error=1
+        ng_error=$(echo -e "$ng_error\n\tList is not valid in $ng_mode mode")
+    fi
+
+    if [ $flg_query_name -eq 1 ] ; then
+        flg_error=1
+        ng_error=$(echo -e "$ng_error\n\tQuery name is not valid in $ng_mode mode")
+    fi
+
+    if [ $flg_state -eq 1 ] ; then
+        flg_error=1
+        ng_error=$(echo -e "$ng_error\n\tState is not valid in $ng_mode mode")
+    fi
+
+    if [ $flg_custom -eq 1 ] ; then
+        flg_error=1
+        ng_error=$(echo -e "$ng_error\n\tCustom values are not valid in $ng_mode mode")
+    fi
+}
+
+# Sets flg_error to 1 if any ack specific parameters are set
+noAckParams() {
+    if [ $flg_sticky -eq 1 ] ; then
+        flg_error=1
+        ng_error=$(echo -e "$ng_error\n\tSticky is not valid in $ng_mode mode")
+    fi
+
+    if [ $flg_notify -eq 1 ] ; then
+        flg_error=1
+        ng_error=$(echo -e "$ng_error\n\tNotify is not valid in $ng_mode mode")
+    fi
+}
+
+# Sets flg_error to 1 if any up specific parameters are set
+noUpParams() {
+    if [ $flg_my -eq 1 ] ; then
+        flg_error=1
+        ng_error=$(echo -e "$ng_error\n\tMy is not valid in $ng_mode mode")
+    fi
+
+    if [ $flg_type -eq 1 ] ; then
+        flg_error=1
+        ng_error=$(echo -e "$ng_error\n\tType is not valid in $ng_mode mode")
+    fi
+
+    if [ $flg_all -eq 1 ] ; then
+        flg_error=1
+        ng_error=$(echo -e "$ng_error\n\tAll is not valid in $ng_mode mode")
+    fi
+}
+
+# Sets flg_error to 1 if any rmdown specific parameters are set
+noRmdownParams() {
+    if [ $flg_dt_id -eq 1 ] ; then
+        flg_error=1
+        ng_error=$(echo -e "$ng_error\n\tDowntime ID is not valid in $ng_mode mode")
+    fi
+}
+
+# Sets flg_error to 1 if more than 1 host, hostgroup or service is specified
+noMultipleHostsServices(){
+    #   Check that we only have 1 hostname
+    tmpArray=($ng_hostnames)
+    if [ ${#tmpArray[@]} -gt 1 ]; then
+        flg_error=1
+        ng_error=$(echo -e "$ng_error\n\tMultiple hostnames are not valid in $ng_mode mode")
+    fi
+
+#   Check that we only have 1 hostgroup
+    tmpArray=($ng_hostgroups)
+    if [ ${#tmpArray[@]} -gt 1 ]; then
+        flg_error=1
+        ng_error=$(echo -e "$ng_error\n\tMultiple hostgroups are not valid in $ng_mode mode")
+    fi
+
+#   Check that we only have 1 service
+    tmpArray=($cmd_services)
+    if [ ${#tmpArray[@]} -gt 1 ]; then
+        flg_error=1
+        ng_error=$(echo -e "$ng_error\n\tMultiple services are not valid in $ng_mode mode")
+    fi
+}
+
+removeDowntime(){
+    # either /should/ work...
+
+    ls_command="COMMAND [$(date +%s)] DEL_HOST_DOWNTIME;$ng_dt_id"
+    out DEBUG sending: $ls_command
+    echo -e "$ls_command" $(date +%s) > $env_cmdpipe
+
+    ls_command="COMMAND [$(date +%s)] DEL_SVC_DOWNTIME;$ng_dt_id"
+    out DEBUG sending: $ls_command
+    echo -e "$ls_command" $(date +%s) > $env_cmdpipe
+    
+    # pause, then query to see if dt still exists
+    sleep $ng_sleepZ
+
+    out DEBUG "Validating removal"
+    lql_post_query="GET downtimes\nFilter: id = $ng_dt_id\nColumns: id\n"
+    out DEBUG Validation query: $lql_post_query
+    lql_result=$(echo -e "$lql_post_query" | unixcat $env_livestatus)
+    out DEBUG "Got lql_result: $lql_result"
+    
+    if [ "$lql_result" != "$ng_dt_id" ]; then
+        out ok "Downtime $ng_dt_id removed\n"
+    else
+        ng_error="$ng_error\nDowntime ID-$ng_dt_id not removed"
+        flg_error=1
+    fi
+}
+
+downtimeType(){
+    if [ "$1" == "active" ] || [ "$1" == "pending" ] || [ "$1" == "any" ]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+
 # End of functions
 
 # Now we need to get all the command line parameters.  To match them we need to use a 'if ... fi' rather than a 'case ... esac' as 
@@ -591,6 +732,14 @@ do
     elif [ "${switch}" == "-n" ]; then
         flg_notify=1
         out DEBUG "Found -n"
+
+    elif [ "${switch}" == "--my" ]; then
+        flg_my=1
+        out DEBUG "Found --my"
+
+    elif [ "${switch}" == "--all" ]; then
+        flg_all=1
+        out DEBUG "Found --all"
 
     elif [ "${switch}" == "--list" ]; then
         flg_list=1
@@ -768,7 +917,7 @@ do
                 out DEBUG "Ignoring duplicate service ${switch:3}"
             fi
         else
-            out DEBUG "Adding ${switch:3} to services"
+            out DEBUG "Adding ${switch:3} to services (first found)"
             ng_services=${switch:3}
             flg_service=1
         fi
@@ -986,6 +1135,8 @@ do
             out DEBUG "Found --custom with ${#ng_custom[@]} values"
         fi
 
+# Query and up mode parmaeters
+
     elif [ "${switch:0:2}" == "-u" ]; then
         fnd_username=1
         if [ $flg_username -eq 1 ]; then
@@ -995,23 +1146,39 @@ do
             ng_username=${switch:3}
             out DEBUG "Found -u with value '$ng_username'"
         fi
-
-    elif [ "$switch" == "down" ] || [ "$switch" == "ack" ] || [ "$switch" == "up" ] || [ "$switch" == "query" ]; then
-        ng_mode=$switch
-        # I think this is duplicating a much earlier check ^^^^  should probably merge with the following
+    
+    elif [ "${switch:0:6}" == "--type" ]; then
+        fnd_type=1
+        if [ $flg_type -eq 1 ]; then
+            out DEBUG "Found and ignoring another --type"
+        else
+            flg_type=1
+            ng_type=${switch:7}
+            out DEBUG "Found --type with value '$ng_type'"
+            downtimeType $ng_type
+            if [ $? -eq 1 ]; then
+                ng_error="$ng_error\n\tInvalid value '${switch:7}' for --type"
+                flg_error=1
+            fi
+        fi
 
     elif [ "$switch" == "--debug=1" ] || [ "$switch" == "--debug=2" ] || [ "$switch" == "--debug=0" ] || 
-         [ "$switch" == "--devMode=1" ] || [ "$switch" == "--devMode=2" ] || 
+         [ "$switch" == "--devMode=1" ] || [ "$switch" == "--devMode=2" ] || [ "$switch" == "down" ] ||
          [ "$switch" == "dc" ] || [ "$switch" == "ec" ] || [ "$switch" == "dn" ] || [ "$switch" == "en" ] ||
-         [ "$switch" == "disable-checks" ] || [ "$switch" == "enable-checks" ] || [ "$switch" == "disable-notifications" ] || [ "$switch" == "enable-notifications" ]
+         [ "$switch" == "disable-checks" ] || [ "$switch" == "enable-checks" ] || [ "$switch" == "disable-notifications" ] ||
+         [ "$switch" == "enable-notifications" ] || [ "$switch" == "ack" ] || [ "$switch" == "up" ] || 
+         [ "$switch" == "query" ] || [ "$switch" == "rd" ] || [ "$switch" == "remove-downtime" ]
          then
         echo "Catch-all for ok" &> /dev/null
 
     else
-        out err "Ignoring unknown parameter $switch"
+        # Change to previous behaviour where unrecognised parameters where ignored
+        ng_error="$ng_error\n\tUnknown parameter $switch"
+        flg_error=1
     fi
 done
 
+# If 'devkit' is available, load debughacks (fakes simply a socket and pipe for local testing)
 if [ -r ./devkit/debughacks.inc ]; then
     source ./devkit/debughacks.inc
 fi
@@ -1072,15 +1239,17 @@ out debug "comment             [$ng_comment]"
 out debug "rangex              [$ng_rangex]"
 out debug "rangey              [$ng_rangey]"
 out debug "parity              [$ng_parity]"
+out debug "user                [$ng_username]"
 out debug "filters             [$ng_filters]"
 out debug "query name          [$ng_query_name]"
 out debug "state               [$ng_state]"
 out debug "config              [$ng_config_filename]"
 out debug "custom values       [${ng_custom[@]}]"
+out debug "downtime id         [$ng_dt_id]"
+out debug "downtime type       [$ng_type]"
 out debug "throttle            [$ng_sleepz]"
 out debug "validation pause    [$ng_sleepZ]"
 out debug "command retries     [$ng_retry]"
-out debug "downtime id         [$ng_dt_id]"
 out debug "validation retries  [$ng_validation_retry]"
 out debug "Switches:"
 out debug "-o override         [$flg_override]"
@@ -1090,6 +1259,7 @@ out debug "-n notify           [$flg_notify]"
 out debug "-v verbose          [$flg_verbose]"
 out debug "-V very verbose     [$flg_veryverbose]"
 out debug "-q quiet            [$flg_quiet]"
+out debug "--my downtimes      [$flg_my]"
 out debug "--list queries      [$flg_list]"
 out debug "--validate config   [$flg_validate]"
 out debug "------------------------------------------------------"
@@ -1119,7 +1289,8 @@ out debug "Checking for errors - host targets"
 
 case "$errchk_targets" in
     0)
-        if [ $ng_mode == down ]; then
+        # Not all modes require a host target
+        if [ $ng_mode != query ] && [ $ng_mode != rmdown ]; then
             ng_error="$ng_error\n\tNo hostnames, hostgroups or host template specified"
             flg_error=1
         fi
@@ -1148,6 +1319,7 @@ esac
 
 # First we'll do some extensive checking of times for 'down' mode
 
+out debug "Checking for errors - times"
 if [ $ng_mode == down ]; then
 
     # Values for $errchk_times (8 valid):
@@ -1402,40 +1574,40 @@ if [ $ng_mode == down ]; then
                 datefunc unix $cmd_endtime
                 out debug "End:   $func_time"
 
-    elif [ $ng_mode == query ]; then
+elif [ $ng_mode == query ]; then
 
-        out debug Checking times in query context
+    out debug Checking times in query context
 
-        if [ $flg_begintime -gt 0 ]; then
-            datefunc absolute "$ng_begintime"
-            if [ $? -eq 0 ]; then 
-                cmd_starttime=$func_time
-            else
-                out ERR "Something has gone horribly wrong"; exit 1
-            fi
+    if [ $flg_begintime -gt 0 ]; then
+        datefunc absolute "$ng_begintime"
+        if [ $? -eq 0 ]; then 
+            cmd_starttime=$func_time
+        else
+            out ERR "Something has gone horribly wrong"; exit 1
         fi
+    fi
 
-        if [ $fnd_endtime -gt 0 ]; then
-            datefunc absolute "$ng_endtime"
-            if [ $? -eq 0 ]; then 
-                cmd_endtime=$func_time
-            else
-                out ERR "Something has gone horribly wrong"; exit 1
-            fi
+    if [ $fnd_endtime -gt 0 ]; then
+        datefunc absolute "$ng_endtime"
+        if [ $? -eq 0 ]; then 
+            cmd_endtime=$func_time
+        else
+            out ERR "Something has gone horribly wrong"; exit 1
         fi
+    fi
 
-        if [ $fnd_hours -gt 0 ]; then
-            ng_error="$ng_error\n\tHours is not valid in query mode"
-            flg_error=1
-        fi
+    if [ $fnd_hours -gt 0 ]; then
+        ng_error="$ng_error\n\tHours is not valid in query mode"
+        flg_error=1
+    fi
 
-        if [ $fnd_minutes -gt 0 ]; then
-            ng_error="$ng_error\n\tMinutes is not valid in query mode"
-            flg_error=1
-        fi
+    if [ $fnd_minutes -gt 0 ]; then
+        ng_error="$ng_error\n\tMinutes is not valid in query mode"
+        flg_error=1
+    fi
 
-        out debug "Start time if any is $cmd_starttime"
-        out debug "End time if any is $cmd_endtime"
+    out debug "Start time if any is $cmd_starttime"
+    out debug "End time if any is $cmd_endtime"
 
 fi
 
@@ -1445,7 +1617,7 @@ fi
 # 3 - Start and end of range specified                              7 - Start, end and parity of range specified
 # 4 - INVALID: Only parity of range specified 
 
-
+out debug "Checking for errors - range"
 if [ $errchk_range -gt 0 ] && [ $errchk_targets -ne 2 ]; then
     ng_error="$ng_error\n\tRange specified without host template, or hostname(s) and/or hostgroup(s) specified as well"
     flg_error=1
@@ -1585,9 +1757,19 @@ fi
 out debug "Finished checking for generic errors"
 out debug "------------------------------------------------------"
 
+# Any references to time are only valid for these modes
+if [ $ng_mode != down ] && [ $ng_mode != up ] && [ $ng_mode != query ]; then
+    ng_time_check=$(( $flg_begintime + $flg_endtime + $flg_minutes + $flg_hours ))
+    out DEBUG "Time check is $ng_time_check"
+    if [ $ng_time_check -gt 0 ]; then
+        flg_error=1
+        ng_error=$(echo -e "$ng_error\n\tTimes or durations are not valid for $ng_mode mode")
+    fi
+fi
 
-if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "up" ]; then      # this should cover all use cases (send and validate a command) 
-                                                                  # except query and up modes which are handled seperately
+if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "up" ]; then  
+                # this should cover all use cases (send and validate a command) 
+                # except query, rmdown and up modes which are handled seperately
 
     # Mode specific error checking - all but query mode
 
@@ -1597,68 +1779,25 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "up" ]; then      # this should 
             flg_error=1
             ng_error="$ng_error\n\tNo comment provided"
         fi
-    fi
-
-    # Error if query mode specfic parameters have been specified
-    if [ $ng_mode != query ]; then
-
-        if [ $flg_config_filename -eq 1 ] ; then
+    else
+        if [ $flg_comment -eq 1 ] ; then
             flg_error=1
-            ng_error=$(echo -e "$ng_error\n\tConfig file is not valid in $ng_mode mode")
-        fi
-
-        if [ $flg_validate -eq 1 ] ; then
-            flg_error=1
-            ng_error=$(echo -e "$ng_error\n\tValidate is not valid in $ng_mode mode")
-        fi
-
-        if [ $flg_list -eq 1 ] ; then
-            flg_error=1
-            ng_error=$(echo -e "$ng_error\n\tList is not valid in $ng_mode mode")
-        fi
-
-        if [ $flg_query_name -eq 1 ] ; then
-            flg_error=1
-            ng_error=$(echo -e "$ng_error\n\tQuery name is not valid in $ng_mode mode")
-        fi
-
-        if [ $flg_state -eq 1 ] ; then
-            flg_error=1
-            ng_error=$(echo -e "$ng_error\n\tState is not valid in $ng_mode mode")
-        fi
-
-        if [ $flg_custom -eq 1 ] ; then
-            flg_error=1
-            ng_error=$(echo -e "$ng_error\n\tCustom values are not valid in $ng_mode mode")
+            ng_error="$ng_error\n\tComment not valid in $ng_mode mode"
         fi
     fi
 
+    # Error if query, up or rmdown mode specfic parameters have been specified
+    noQueryParams
+    noUpParams
+    noRmdownParams
 
+    # Error if ack mode specfic parameters have been specified
     if [ $ng_mode != ack ]; then
-
-        if [ $flg_sticky -eq 1 ] ; then
-            flg_error=1
-            ng_error=$(echo -e "$ng_error\n\tSticky is not valid in $ng_mode mode")
-        fi
-
-        if [ $flg_notify -eq 1 ] ; then
-            flg_error=1
-            ng_error=$(echo -e "$ng_error\n\tNotify is not valid in $ng_mode mode")
-        fi
+        noAckParams
     fi
 
     if [ $ng_mode == ack ]; then
-
         out DEBUG "Beginning ACK mode checks\n"
-    
-        # Any referecnes to time aren't valid here
-        ng_time_check=$(( $flg_begintime + $flg_endtime + $flg_minutes + $flg_hours ))
-        out DEBUG "Time check is $ng_time_check"
-        if [ $ng_time_check -gt 0 ]; then
-            flg_error=1
-            ng_error=$(echo -e "$ng_error\n\tTimes or durations are not valid for 'ack' mode")
-        fi
-
         if [ ${#cmd_targets} -eq 0 ] && [ ${#cmd_services} -eq 0 ]; then
             flg_error=1
             ng_error="$ng_error\n\tNothing to acknowledge"
@@ -1668,7 +1807,6 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "up" ]; then      # this should 
         if [ $flg_error -eq 1 ]; then out err "$ng_error"; exit 1; fi
 
         out DEBUG "Finished error checking in ACK mode"
-
     fi
 
     # If generic errors or specific errors were found, report them and exit
@@ -1891,40 +2029,22 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "up" ]; then      # this should 
 #   End of command mode code
 #------------------------------------------------------------------------------------------------------------------
 
-
-
 #------------------------------------------------------------------------------------------------------------------
 # Starting error checking in query mode
 
 elif [ "$ng_mode" == "query" ]; then
 
-    out DEBUG "query mode - fun!  Needs a query nameand other parameters\n"
+    out DEBUG "query mode - fun!  Needs a query name and other parameters\n"
     
     if [ $flg_quiet -eq 1 ] ; then
         flg_error=1
-        ng_error=$(echo -e "$ng_error\n\tQuiet is not valid in query mode")
+        ng_error=$(echo -e "$ng_error\n\tQuiet is not valid in $ng_mode mode")
     fi
 
-#   Check that we only have 1 hostname
-    tmpArray=($ng_hostnames)
-    if [ ${#tmpArray[@]} -gt 1 ]; then
-        flg_error=1
-        ng_error=$(echo -e "$ng_error\n\tMultiple hostnames are not valid in query mode")
-    fi
-
-#   Check that we only have 1 hostgroup
-    tmpArray=($ng_hostgroups)
-    if [ ${#tmpArray[@]} -gt 1 ]; then
-        flg_error=1
-        ng_error=$(echo -e "$ng_error\n\tMultiple hostgroups are not valid in query mode")
-    fi
-
-#   Check that we only have 1 service
-    tmpArray=($cmd_services)
-    if [ ${#tmpArray[@]} -gt 1 ]; then
-        flg_error=1
-        ng_error=$(echo -e "$ng_error\n\tMultiple services are not valid in query mode")
-    fi
+    # Error if there are multiple hosts/services, or Up or Rmdown parameters are specified
+    noMultipleHostsServices
+    noUpParams
+    noRmdownParams
 
 #   Check that we have a max of 5 custom values
     if [ ${#ng_custom[@]} -gt 5 ]; then
@@ -2404,16 +2524,18 @@ elif [ "$ng_mode" == "query" ]; then
         echo Unable to find query for $section
     fi
 
+#   End of query mode code
+#------------------------------------------------------------------------------------------------------------------
 
-    # End of query mode (and several more... tbc)
-    # --------------------------------------------------------------------------------------
+#------------------------------------------------------------------------------------------------------------------
+#   Starting rmdown mode
 
-elif [ "$ng_mode" == "up" ]; then
-    # echo Up mode goes here
+elif [ "$ng_mode" == "rmdown" ]; then
+    # echo rmdown mode goes here
     up_err=0
 
     if [ $fnd_dt_id -eq 0 ]; then
-        out err "up mode:"
+        out err "rmdown mode:"
         out err '    No downtime ID found'
         up_err=1
     fi
@@ -2422,9 +2544,10 @@ elif [ "$ng_mode" == "up" ]; then
     [ $fnd_custom -ne 0 ] || [ $fnd_endtime -ne 0 ] || [ $fnd_hostgroup -ne 0 ] || [ $fnd_hostname -ne 0 ] ||
     [ $fnd_hosttemplate -ne 0 ] || [ $fnd_hours -ne 0 ] || [ $fnd_minutes -ne 0 ] || [ $fnd_notify -ne 0 ] ||
     [ $fnd_parity -ne 0 ] || [ $fnd_rangex -ne 0 ] || [ $fnd_rangey -ne 0 ] || [ $fnd_service -ne 0 ] ||
-    [ $fnd_state -ne 0 ] || [ $fnd_sticky -ne 0 ] || [ $fnd_username -ne 0 ]; then
+    [ $fnd_state -ne 0 ] || [ $fnd_sticky -ne 0 ] || [ $fnd_username -ne 0 ] || [ $flg_my -eq 1 ] ||
+    [ $flg_type -eq 1 ]; then
         if [ $up_err -eq 0 ]; then out err "up mode:"; fi
-        out err '    Invalid parameters specified: up mode requires only -i (downtime entry ID)'
+        out err '    Invalid parameters specified: rmdown mode requires only -i (downtime entry ID)'
         out err '    Tuning parameters may be specified, but are not implemented yet'
         up_err=1
     fi
@@ -2432,26 +2555,114 @@ elif [ "$ng_mode" == "up" ]; then
     if [ $up_err -eq 1 ]; then exit 12; fi
     
     out debug We have downtime entry $ng_dt_id
+    removeDowntime
 
-    # either /should/ work
-    ls_command="DEL_HOST_DOWNTIME;$ng_dt_id"
-    out DEBUG sending: $ls_command
-    echo -e "$ls_command" $(date +%s) > $env_cmdpipe
-    
-    ls_command="DEL_SVC_DOWNTIME;$ng_dt_id"
-    out DEBUG sending: $ls_command
-    echo -e "$ls_command" $(date +%s) > $env_cmdpipe
-    
-    # pause, then query to see if dt still exists
-    sleep $ng_sleepZ
+    # If errors were found, report them and exit
+    if [ $flg_error -eq 1 ]; then out err "$ng_error"; exit 1; fi
 
-    lql_post_query="GET downtimes\Filter: id = $ng_dt_id\Columns: id\n"
-    lql_result=$(echo -e "$lql_post_query" | unixcat $env_livestatus)
-    echo Result is $lql_result
-    
-    if [ '$lql_result' != '$ng_dtid' ]; then
-        out info "Downtime removed"
-    else
-        out err "Downtime not removed"
+
+
+#   End of rmdown mode code
+#------------------------------------------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------------------------------------------
+#   Starting up mode code
+elif [ "$ng_mode" == "up" ]; then
+
+    out debug 'Starting up mode'
+    noQueryParams
+    noAckParams
+    noMultipleHostsServices
+
+    if [ $flg_hostgroup -eq 1 ]; then
+        flg_error=1
+        ng_error=$(echo -e "$ng_error\n\tHostgroup is not valid in $ng_mode mode")
     fi
+
+    if [ $flg_my -eq 1 ] && [ $flg_username -eq 1 ]; then
+        flg_error=1
+        ng_error=$(echo -e "$ng_error\n\tCant't specify --my with -u")
+    fi
+
+    if [ $fnd_minutes -eq 1 ]; then
+        flg_error=1
+        ng_error=$(echo -e "$ng_error\n\tMinutes is not valid in $ng_mode")
+    fi
+
+    if [ $fnd_hours -eq 1 ]; then
+        flg_error=1
+        ng_error=$(echo -e "$ng_error\n\tHours is not valid in $ng_mode")
+    fi
+
+    # If generic errors or specific errors were found, report them and exit
+    if [ $flg_error -eq 1 ]; then out err "$ng_error"; exit 1; fi
+
+    #Build the LQL query
+    out debug 'Building query'
+    ng_up_query="GET downtimes"
+
+    if [ $fnd_hostname -eq 1 ]; then
+        ng_up_query="$ng_up_query\nFilter: host_name = $ng_hostnames"
+    fi
+
+    if [ $fnd_service -eq 1 ]; then
+        ng_up_query="$ng_up_query\nFilter: service_description = $ng_services"
+    fi
+
+    if [ $fnd_begintime -eq 1 ]; then
+        datefunc absolute $cmd_starttime
+        ng_up_query="$ng_up_query\nFilter: start_time = $func_time"
+    fi
+
+    if [ $fnd_endtime -eq 1 ]; then
+        datefunc absolute $cmd_endtime
+        ng_up_query="$ng_up_query\nFilter: end_time = $func_time"
+    fi
+
+    if [ $fnd_username -eq 1 ]; then
+        ng_up_query="$ng_up_query\nFilter: author = $ng_username"
+    fi
+
+    if [ $flg_my -eq 1 ]; then
+        ng_up_query="$ng_up_query\nFilter: author = $cmd_user"
+    fi
+
+    if [ $fnd_comment -eq 1 ]; then
+        ng_up_query="$ng_up_query\nFilter: comment ~ $ng_comment"
+    fi
+
+    if [ $flg_type -eq 1 ]; then
+        if [ "$ng_type" == "pending" ]; then
+            ng_up_query="$ng_up_query\nFilter: type = 1"
+        fi
+
+        if [ "$ng_type" == "active" ]; then
+            ng_up_query="$ng_up_query\nFilter: type = 0"
+        fi
+    fi
+
+    ng_up_query="$ng_up_query\nColumns: id"
+    ng_up_query="$ng_up_query\n\n"
+
+    out DEBUG "$ng_up_query"
+
+    lql_result=($(echo -e "$ng_up_query" | unixcat $env_livestatus))
+
+    # If there's no result, error and exit
+    if [ ${#lql_result[@]} -eq 0 ]; then
+        out err "No downtime entry found matching criteria"
+        exit 1
+    fi
+
+    out debug "Found ${#lql_result[@]} ID(s) matching criteria: $lql_result"
+
+    for id in ${lql_result[@]}; do
+        ng_dt_id=$id
+        out DEBUG "Removing downtime ID $ng_dt_id"
+        removeDowntime
+    done
+
+    # If errors were found, report them and exit
+    if [ $flg_error -eq 1 ]; then out err "$ng_error"; exit 1; fi
+
 fi

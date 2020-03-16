@@ -3,6 +3,7 @@ README
 ngctl was born out of a need to quickly and easily set a downtime on an alerting host without having to navigate a web interface.  That morphed into a bigger project to allow setting more specific downtime entries such as a specific service on a specific host, and maybe for a specific time in the future.
 
 Over time this grew to also supporting acknowledging problems, and enabling or disabling checks and notifications.
+It now supports querying Nagios via a predefined set of queries in a configuration file (ngctlq.conf) and also removing downtime entries by ID or by using some or all of the paramaters used to add the downtime entry.
 
 It's always a work in progress, but it does work.
 
@@ -16,8 +17,10 @@ Prerequisites:
 
 Use
 
-ngctl currently works in seven modes
+ngctl currently works in several modes
  * down             add a host or service downtime
+ * up               remove a host or service downtime
+ * rd               remove a host or service downtime by ID
  * ack              acknowledge host or service problems
  * dn               Disable host or service notifications
  * en               Enable host or service notifications
@@ -61,6 +64,9 @@ Not all parameters require a value.
         a string which is a Nagios hostgroup. Can be specified multiple times, or can be a quoted space delimited list of hostgroups
         hostgroup can't be specified with a hostname template
 
+-i      downtime ID
+        the ID of a downtime entry to remove
+
 -k      sticky acknowledge
         denotes an acknowledge command should be 'sticky'
 
@@ -99,7 +105,7 @@ Not all parameters require a value.
         denotes test mode.  No commands will be executed - used for checking parameter interpretation and validity
 
 -u      username
-        a string, the username to use in query mode
+        a string, the username to use in query mode or up mode
 
 -v      verbose
         denotes output should be verbose
@@ -119,6 +125,11 @@ Not all parameters require a value.
 -Z      command pause
         a number (float), the time to pause after validating a command before trying to send the next command
 
+--type      type of downtime entry to find
+            one of 'active', 'pending' or 'any', used in 'up' mode
+
+--my        my downtimes entries
+            in 'up' mode find only current user's entries
 
 --config    override query config filename
             a string, a custom filename to override default ngctlq.conf file
@@ -231,18 +242,17 @@ End time
 
 Specifying services
 
-Services are specified by the -s parameter.  You can specify a single service or multiple services; you can specify -s multiple times or you can specify more than one service with -s either comma delimitered or quoted space delimited.
+Services are specified by the -s parameter.  You can specify a single service or multiple services; you can specify -s multiple times or you can specify more than one service with -s quoted space delimited.
 
     Valid examples
         -s=log_age
         -s='app_log_age app_log_backup'
-        -s=app_log_age,app_log_backup
 
 
 
 Tuning command and query speed 
 
-This does not apply to query mode.
+This does not apply to query, rd or up modes.
 
 Depending on the load on your Nagios server, you might need to throttle how fast commands and queries are made, and how many times to retry. Defaults are set in the script for the parameters which control this behaviour.
 
