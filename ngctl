@@ -645,24 +645,26 @@ noMultipleHostsServices(){
 }
 
 removeDowntime(){
-    # either /should/ work, but..
-    if [ $fnd_service -eq 0 ]; then
-        ls_command="DEL_HOST_DOWNTIME;$ng_dt_id"
-        out DEBUG sending: $ls_command
-        echo -e "$ls_command" $(date +%s) > $env_cmdpipe
-    else
-        ls_command="DEL_SVC_DOWNTIME;$ng_dt_id"
-        out DEBUG sending: $ls_command
-        echo -e "$ls_command" $(date +%s) > $env_cmdpipe
-    fi
+    # either /should/ work...
+
+    ls_command="COMMAND [$(date +%s)] DEL_HOST_DOWNTIME;$ng_dt_id"
+    out DEBUG sending: $ls_command
+    echo -e "$ls_command" $(date +%s) > $env_cmdpipe
+
+    ls_command="COMMAND [$(date +%s)] DEL_SVC_DOWNTIME;$ng_dt_id"
+    out DEBUG sending: $ls_command
+    echo -e "$ls_command" $(date +%s) > $env_cmdpipe
     
     # pause, then query to see if dt still exists
     sleep $ng_sleepZ
 
-    lql_post_query="GET downtimes\Filter: id = $ng_dt_id\Columns: id\n"
+    out DEBUG "Validating removal"
+    lql_post_query="GET downtimes\nFilter: id = $ng_dt_id\nColumns: id\n"
+    out DEBUG Validation query: $lql_post_query
     lql_result=$(echo -e "$lql_post_query" | unixcat $env_livestatus)
+    out DEBUG "Got lql_result: $lql_result"
     
-    if [ '$lql_result' != '$ng_dtid' ]; then
+    if [ "$lql_result" != "$ng_dt_id" ]; then
         out ok "Downtime $ng_dt_id removed\n"
     else
         ng_error="$ng_error\nDowntime ID-$ng_dt_id not removed"
@@ -1164,7 +1166,8 @@ do
          [ "$switch" == "--devMode=1" ] || [ "$switch" == "--devMode=2" ] || [ "$switch" == "down" ] ||
          [ "$switch" == "dc" ] || [ "$switch" == "ec" ] || [ "$switch" == "dn" ] || [ "$switch" == "en" ] ||
          [ "$switch" == "disable-checks" ] || [ "$switch" == "enable-checks" ] || [ "$switch" == "disable-notifications" ] ||
-         [ "$switch" == "enable-notifications" ] || [ "$switch" == "ack" ] || [ "$switch" == "up" ] || [ "$switch" == "query" ]
+         [ "$switch" == "enable-notifications" ] || [ "$switch" == "ack" ] || [ "$switch" == "up" ] || 
+         [ "$switch" == "query" ] || [ "$switch" == "rd" ] || [ "$switch" == "remove-downtime" ]
          then
         echo "Catch-all for ok" &> /dev/null
 
@@ -2571,7 +2574,7 @@ elif [ "$ng_mode" == "up" ]; then
     noAckParams
     noMultipleHostsServices
 
-    if [ $flg_hostgroup -eq 1 ] ; then
+    if [ $flg_hostgroup -eq 1 ]; then
         flg_error=1
         ng_error=$(echo -e "$ng_error\n\tHostgroup is not valid in $ng_mode mode")
     fi
@@ -2579,6 +2582,16 @@ elif [ "$ng_mode" == "up" ]; then
     if [ $flg_my -eq 1 ] && [ $flg_username -eq 1 ]; then
         flg_error=1
         ng_error=$(echo -e "$ng_error\n\tCant't specify --my with -u")
+    fi
+
+    if [ $fnd_minutes -eq 1 ]; then
+        flg_error=1
+        ng_error=$(echo -e "$ng_error\n\tMinutes is not valid in $ng_mode")
+    fi
+
+    if [ $fnd_hours -eq 1 ]; then
+        flg_error=1
+        ng_error=$(echo -e "$ng_error\n\tHours is not valid in $ng_mode")
     fi
 
     # If generic errors or specific errors were found, report them and exit
@@ -2626,8 +2639,6 @@ elif [ "$ng_mode" == "up" ]; then
         if [ "$ng_type" == "active" ]; then
             ng_up_query="$ng_up_query\nFilter: type = 0"
         fi
-    else
-        ng_up_query="$ng_up_query\nFilter: type = 0"
     fi
 
     ng_up_query="$ng_up_query\nColumns: id"
