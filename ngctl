@@ -1757,6 +1757,7 @@ if [ $comb_target -eq 1 ]; then
         flg_error=1
         ng_error="$ng_error\n\tCan't build hostnames list from template without a valid range"
     fi
+    out DEBUG "Targets: $cmd_targets"
 fi
 
 # Purley for consistency later, set some more variables; all the values in the command and validate
@@ -2594,12 +2595,12 @@ elif [ "$ng_mode" == "up" ]; then
     out debug 'Starting up mode'
     noQueryParams
     noAckParams
-    noMultipleHostsServices
+    # noMultipleHostsServices
 
-    if [ $flg_hostgroup -eq 1 ]; then
-        flg_error=1
-        ng_error=$(echo -e "$ng_error\n\tHostgroup is not valid in $ng_mode mode")
-    fi
+    # if [ $flg_hostgroup -eq 1 ]; then
+    #     flg_error=1
+    #     ng_error=$(echo -e "$ng_error\n\tHostgroup is not valid in $ng_mode mode")
+    # fi
 
     if [ $flg_my -eq 1 ] && [ $flg_username -eq 1 ]; then
         flg_error=1
@@ -2620,15 +2621,25 @@ elif [ "$ng_mode" == "up" ]; then
     if [ $flg_error -eq 1 ]; then out err "$ng_error"; exit 1; fi
 
     #Build the LQL query
+    ng_filter_hosts=0
+    ng_filter_services=0
     out debug 'Building query'
     ng_up_query="GET downtimes"
 
-    if [ $fnd_hostname -eq 1 ]; then
-        ng_up_query="$ng_up_query\nFilter: host_name = $ng_hostnames"
+    if [ $fnd_hostname -eq 1 ] || [ $fnd_hostgroup -eq 1 ]; then
+        for ng_host in ${cmd_targets[@]}; do
+            ng_up_query="$ng_up_query\nFilter: host_name = $ng_host"
+            ng_filter_hosts=$(( $ng_filter_hosts + 1 ))
+        done
+        ng_up_query="$ng_up_query\nOr: $ng_filter_hosts"
     fi
 
     if [ $fnd_service -eq 1 ]; then
-        ng_up_query="$ng_up_query\nFilter: service_description = $ng_services"
+        for ng_service in ${cmd_services[@]};do
+            ng_up_query="$ng_up_query\nFilter: service_description = $ng_service"
+            ng_filter_services=$(( $ng_filter_services + 1 ))
+        done
+        ng_up_query="$ng_up_query\nOr: $ng_filter_services"
     fi
 
     if [ $fnd_begintime -eq 1 ]; then
