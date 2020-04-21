@@ -462,6 +462,8 @@ getHostsbygroup (){
         lql_result=''
     fi
 
+    lql=''
+
     if [ ${#lql_result} -gt 0 ]; then
         for hg_host in $lql_result; do
             if [ ${#hostgroup_hosts} -gt 0 ]; then
@@ -2517,8 +2519,10 @@ elif [ "$ng_mode" == "query" ]; then
             echo -e "\nGot query[\n$lql]\n"
         else 
             out debug "Sending query"
-            ngq_result=$(echo -e "$lql\n" | unixcat /var/spool/nagios/cmd/live)
-            echo -e "$ngq_result"
+            ngq_result=$(echo -e "$lql\n" | unixcat $env_livestatus)
+            if [ ${#ngq_result} -gt 0 ]; then
+                echo -e "$ngq_result"
+            fi
         fi
     else
         echo Unable to find query for $section
