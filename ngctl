@@ -686,8 +686,9 @@ removeDowntime(){
 
     if [ $flg_command_success -eq 1 ]; then
         out ok "Downtime $ng_dt_id removed\n"
+        out debug "Removing $ng_dt_id took $cmd_dt_tries attempts"
     else
-        out err "Failed after $cmd_dt_tries attempts\n"
+        out err "Failed to remove $ng_dt_id after $cmd_dt_tries attempts\n"
         flg_error=1
     fi
 }
@@ -2595,12 +2596,6 @@ elif [ "$ng_mode" == "up" ]; then
     out debug 'Starting up mode'
     noQueryParams
     noAckParams
-    # noMultipleHostsServices
-
-    # if [ $flg_hostgroup -eq 1 ]; then
-    #     flg_error=1
-    #     ng_error=$(echo -e "$ng_error\n\tHostgroup is not valid in $ng_mode mode")
-    # fi
 
     if [ $flg_my -eq 1 ] && [ $flg_username -eq 1 ]; then
         flg_error=1
