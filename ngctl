@@ -647,29 +647,48 @@ noMultipleHostsServices(){
 }
 
 removeDowntime(){
-    # either /should/ work...
 
-    ls_command="COMMAND [$(date +%s)] DEL_HOST_DOWNTIME;$ng_dt_id"
-    out DEBUG sending: $ls_command
-    echo -e "$ls_command" $(date +%s) > $env_cmdpipe
+    cmd_dt_tries=1               # number of times we've tried sending the command
+    cmd_validate_tries=1         # number of times we've tried to validate, afer each command try
+    flg_command_success=0        # set to 1 once we've successfully validated the command
 
-    ls_command="COMMAND [$(date +%s)] DEL_SVC_DOWNTIME;$ng_dt_id"
-    out DEBUG sending: $ls_command
-    echo -e "$ls_command" $(date +%s) > $env_cmdpipe
+    while [ $flg_command_success -eq 0 ]  && [ $cmd_dt_tries -le $cmd_retries ];
+    do
+        ls_command="COMMAND [$(date +%s)] DEL_HOST_DOWNTIME;$ng_dt_id"
+        out DEBUG sending: $ls_command
+        echo -e "$ls_command" $(date +%s) > $env_cmdpipe
+
+        ls_command="COMMAND [$(date +%s)] DEL_SVC_DOWNTIME;$ng_dt_id"
+        out DEBUG sending: $ls_command
+        echo -e "$ls_command" $(date +%s) > $env_cmdpipe
     
-    # pause, then query to see if dt still exists
-    sleep $ng_sleepZ
+        # pause, then query to see if dt still exists
+        sleep $ng_sleepZ
 
-    out DEBUG "Validating removal"
-    lql_post_query="GET downtimes\nFilter: id = $ng_dt_id\nColumns: id\n"
-    out DEBUG Validation query: $lql_post_query
-    lql_result=$(echo -e "$lql_post_query" | unixcat $env_livestatus)
-    out DEBUG "Got lql_result: $lql_result"
+        while [ $flg_command_success -eq 0 ]  && [ $cmd_validate_tries -le $cmd_validate_retries ];
+        do
+            out DEBUG "Validating removal"
+            lql_post_query="GET downtimes\nFilter: id = $ng_dt_id\nColumns: id\n"
+            out DEBUG Validation query: $lql_post_query
+            lql_result=$(echo -e "$lql_post_query" | unixcat $env_livestatus)
+            out DEBUG "Got lql_result: $lql_result"
     
-    if [ "$lql_result" != "$ng_dt_id" ]; then
+            if [ "$lql_result" != "$ng_dt_id" ]; then
+                flg_command_success=1
+            else
+                cmd_validate_tries=$(( $cmd_validate_tries + 1 ))
+                sleep $ng_sleepz
+            fi
+        done
+        cmd_validate_tries=1
+        cmd_dt_tries=$(( $cmd_dt_tries + 1 ))
+    done
+
+    if [ $flg_command_success -eq 1 ]; then
         out ok "Downtime $ng_dt_id removed\n"
+        out debug "Removing $ng_dt_id took $cmd_dt_tries attempts"
     else
-        ng_error="$ng_error\nDowntime ID-$ng_dt_id not removed"
+        out err "Failed to remove $ng_dt_id after $cmd_dt_tries attempts\n"
         flg_error=1
     fi
 }
@@ -1739,6 +1758,7 @@ if [ $comb_target -eq 1 ]; then
         flg_error=1
         ng_error="$ng_error\n\tCan't build hostnames list from template without a valid range"
     fi
+    out DEBUG "Targets: $cmd_targets"
 fi
 
 # Purley for consistency later, set some more variables; all the values in the command and validate
@@ -2576,12 +2596,6 @@ elif [ "$ng_mode" == "up" ]; then
     out debug 'Starting up mode'
     noQueryParams
     noAckParams
-    noMultipleHostsServices
-
-    if [ $flg_hostgroup -eq 1 ]; then
-        flg_error=1
-        ng_error=$(echo -e "$ng_error\n\tHostgroup is not valid in $ng_mode mode")
-    fi
 
     if [ $flg_my -eq 1 ] && [ $flg_username -eq 1 ]; then
         flg_error=1
@@ -2602,15 +2616,25 @@ elif [ "$ng_mode" == "up" ]; then
     if [ $flg_error -eq 1 ]; then out err "$ng_error"; exit 1; fi
 
     #Build the LQL query
+    ng_filter_hosts=0
+    ng_filter_services=0
     out debug 'Building query'
     ng_up_query="GET downtimes"
 
-    if [ $fnd_hostname -eq 1 ]; then
-        ng_up_query="$ng_up_query\nFilter: host_name = $ng_hostnames"
+    if [ $fnd_hostname -eq 1 ] || [ $fnd_hostgroup -eq 1 ]; then
+        for ng_host in ${cmd_targets[@]}; do
+            ng_up_query="$ng_up_query\nFilter: host_name = $ng_host"
+            ng_filter_hosts=$(( $ng_filter_hosts + 1 ))
+        done
+        ng_up_query="$ng_up_query\nOr: $ng_filter_hosts"
     fi
 
     if [ $fnd_service -eq 1 ]; then
-        ng_up_query="$ng_up_query\nFilter: service_description = $ng_services"
+        for ng_service in ${cmd_services[@]};do
+            ng_up_query="$ng_up_query\nFilter: service_description = $ng_service"
+            ng_filter_services=$(( $ng_filter_services + 1 ))
+        done
+        ng_up_query="$ng_up_query\nOr: $ng_filter_services"
     fi
 
     if [ $fnd_begintime -eq 1 ]; then
