@@ -168,8 +168,12 @@ case "$1" in
     disable-notifications|dn)
             ng_mode=disnotif
             out debug "We are in disable-notifications mode"
-            ;;        
+            ;;
 
+    schedule-check|sc)
+            ng_mode=scheck
+            out debug "We are in schedule-check mode"
+            ;;
     *)
         ng_mode=down
         out debug "We are defaulting to downtime mode as no recognised mode specified as first parameter"
@@ -607,7 +611,9 @@ noUpParams() {
         flg_error=1
         ng_error=$(echo -e "$ng_error\n\tType is not valid in $ng_mode mode")
     fi
+}
 
+noScheckParams(){
     if [ $flg_all -eq 1 ] ; then
         flg_error=1
         ng_error=$(echo -e "$ng_error\n\tAll is not valid in $ng_mode mode")
@@ -1188,7 +1194,8 @@ do
          [ "$switch" == "dc" ] || [ "$switch" == "ec" ] || [ "$switch" == "dn" ] || [ "$switch" == "en" ] ||
          [ "$switch" == "disable-checks" ] || [ "$switch" == "enable-checks" ] || [ "$switch" == "disable-notifications" ] ||
          [ "$switch" == "enable-notifications" ] || [ "$switch" == "ack" ] || [ "$switch" == "up" ] || 
-         [ "$switch" == "query" ] || [ "$switch" == "rd" ] || [ "$switch" == "remove-downtime" ]
+         [ "$switch" == "query" ] || [ "$switch" == "rd" ] || [ "$switch" == "remove-downtime" ] ||
+         [ "$switch" == "sc" ] || [ "$switch" == "schedule-check" ]
          then
         echo "Catch-all for ok" &> /dev/null
 
@@ -1341,7 +1348,7 @@ esac
 # First we'll do some extensive checking of times for 'down' mode
 
 out debug "Checking for errors - times"
-if [ $ng_mode == down ]; then
+if [ $ng_mode = down ] || [ $ng_mode = up ] || [ $ng_mode = scheck ]; then
 
     # Values for $errchk_times (8 valid):
     # 1 - just minutes, assume start now                                9 -  INVALID: end time and minutes
@@ -1779,13 +1786,23 @@ fi
 out debug "Finished checking for generic errors"
 out debug "------------------------------------------------------"
 
+
 # Any references to time are only valid for these modes
-if [ $ng_mode != down ] && [ $ng_mode != up ] && [ $ng_mode != query ]; then
-    ng_time_check=$(( $flg_begintime + $flg_endtime + $flg_minutes + $flg_hours ))
-    out DEBUG "Time check is $ng_time_check"
-    if [ $ng_time_check -gt 0 ]; then
+if [ $ng_mode != down ] && [ $ng_mode != up ] && [ $ng_mode != query ] && [ $ng_mode != scheck ]; then
+    if [ $errchk_times -gt 0 ]; then
         flg_error=1
         ng_error=$(echo -e "$ng_error\n\tTimes or durations are not valid for $ng_mode mode")
+    fi
+fi
+
+# in scheck mode, only an offset or absolute begin time is vaild
+if [ $ng_mode = scheck ]; then
+    if [ $errchk_times -eq 1 ] || [ $errchk_times -eq 2 ] || [ $errchk_times -eq 3 ] || [ $errchk_times -eq 4 ]; then
+        out debug "Time checks for scheck mode OK"
+    else
+        out debug "Time checks for scheck mode FAILED"
+        flg_error=1
+        ng_error=$(echo -e "$ng_error\n\tOnly begin time or durations (as an offset from now) is valid for $ng_mode mode")
     fi
 fi
 
@@ -1818,6 +1835,7 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
         noAckParams
     fi
 
+    # ack mode checks
     if [ $ng_mode == ack ]; then
         out DEBUG "Beginning ACK mode checks\n"
         if [ ${#cmd_targets} -eq 0 ] && [ ${#cmd_services} -eq 0 ]; then
@@ -1829,6 +1847,18 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
         if [ $flg_error -eq 1 ]; then out err "$ng_error"; exit 1; fi
 
         out DEBUG "Finished error checking in ACK mode"
+    fi
+
+    # scheck mode checks
+    if [ $ng_mode == scheck ]; then
+        scheck_host_command="SCHEDULE_HOST_CHECK"
+        if [ $flg_all -eq 1 ]; then
+            scheck_host_command="SCHEDULE_HOST_SVC_CHECKS"
+        fi
+        out DEBUG "scheck_host_command is $scheck_host_command"
+    fi
+    if [ $ng_mode != scheck ]; then
+        noScheckParams
     fi
 
     # If generic errors or specific errors were found, report them and exit
@@ -1946,6 +1976,20 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
                     ls_command="COMMAND [$(date +%s)] ENABLE_HOST_NOTIFICATIONS;$targethost\n"
                     lql_pre_query="GET hosts\nFilter: name = $targethost\nColumns: name\n"
                     lql_post_query="GET hosts\nFilter: name = $targethost\nFilter: state >= 1\nFilter: notifications_enabled = 1\nColumns: notifications_enabled\n"
+                fi
+            
+            elif [ $ng_mode == scheck ]; then
+
+                echo Placeholder
+
+                if [ $flg_service -eq 1 ]; then
+                    ls_command="COMMAND [$(date +%s)] SCHEDULE_SVC_CHECK;$targethost;$service;$cmd_endtime\n"
+                    lql_pre_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nColumns: host_name\n"
+                    lql_post_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nColumns: host_name\n" # next_check
+                else
+                    ls_command="COMMAND [$(date +%s)] $scheck_host_command;$targethost;$cmd_endtime\n"
+                    lql_pre_query="GET hosts\nFilter: name = $targethost\nColumns: name\n"
+                    lql_post_query="GET hosts\nFilter: name = $targethost\nColumns: name\n" # next_check
                 fi
 
             fi
