@@ -34,6 +34,8 @@ env_cmdpipe='/var/log/nagios/rw/nagios.cmd'         # nagios command pipe
 env_server_prefix_regex='prod|dr|fake'             # valid prefixes for server names
 ngq_filename=/etc/nagios/ngctlq.conf                # config file name for query mode
 
+# Hack for now - if a query returns null, return this instead
+ngq_null_query_response="0;No query results"
 
 # For development purposes set this.  Functions that require interaction with a functioning
 # Nagios server will instead return fake data.
@@ -1362,8 +1364,10 @@ if [ $ng_mode = down ] || [ $ng_mode = up ] || [ $ng_mode = scheck ]; then
 
     case "$errchk_times" in
         0)
-            ng_error="$ng_error\n\tNo valid time frame specified"
-            flg_error=1
+            if [ $ng_mode != scheck ]; then
+                ng_error="$ng_error\n\tNo valid time frame specified"
+                flg_error=1
+            fi
             ;;
 
         4)
@@ -1799,6 +1803,9 @@ fi
 if [ $ng_mode = scheck ]; then
     if [ $errchk_times -eq 1 ] || [ $errchk_times -eq 2 ] || [ $errchk_times -eq 3 ] || [ $errchk_times -eq 4 ]; then
         out debug "Time checks for scheck mode OK"
+    elif [ $errchk_times -eq 0 ]; then
+        out debug "Scheduling check for 10 seconds in the future"
+        cmd_endtime=$(date -d "10 seconds" +%s)
     else
         out debug "Time checks for scheck mode FAILED"
         flg_error=1
@@ -1977,19 +1984,17 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
                     lql_pre_query="GET hosts\nFilter: name = $targethost\nColumns: name\n"
                     lql_post_query="GET hosts\nFilter: name = $targethost\nFilter: state >= 1\nFilter: notifications_enabled = 1\nColumns: notifications_enabled\n"
                 fi
-            
-            elif [ $ng_mode == scheck ]; then
 
-                echo Placeholder
+            elif [ $ng_mode == scheck ]; then
 
                 if [ $flg_service -eq 1 ]; then
                     ls_command="COMMAND [$(date +%s)] SCHEDULE_SVC_CHECK;$targethost;$service;$cmd_endtime\n"
                     lql_pre_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nColumns: host_name\n"
-                    lql_post_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nColumns: host_name\n" # next_check
+                    lql_post_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nColumns: next_check\n"
                 else
                     ls_command="COMMAND [$(date +%s)] $scheck_host_command;$targethost;$cmd_endtime\n"
                     lql_pre_query="GET hosts\nFilter: name = $targethost\nColumns: name\n"
-                    lql_post_query="GET hosts\nFilter: name = $targethost\nColumns: name\n" # next_check
+                    lql_post_query="GET hosts\nFilter: name = $targethost\nColumns: next_check\n"
                 fi
 
             fi
@@ -2005,37 +2010,50 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
             out debug "Post-query:\n$lql_post_query"
             if [ $flg_test -eq 0 ] && [ $devMode -eq 0 ]; then
 
-                # Send the pre_query and see if what we're looking to downtime exists
+                # Send the pre_query and see if what we're looking to affect exists
                 # if it does
-                lql_result=$(echo -e "$lql_pre_query" | unixcat $env_livestatus)
-                out DEBUG "Pre-query result: $lql_result"
-                if [ "$lql_result" == "$targethost" ]; then
-                    # check we can write to $env_cmdpipe
-                    if [ -w $env_cmdpipe ]; then
-                        # start some retry logic here
+                lql_pre_result=$(echo -e "$lql_pre_query" | unixcat $env_livestatus)
+                out DEBUG "Pre-query result: $lql_pre_result"
+                if [ "$lql_pre_result" == "$targethost" ]; then
 
-                        cmd_dt_tries=1               # number of times we've tried sending the command
-                        cmd_validate_tries=1         # number of times we've tried to validate, afer each command try
-                        flg_command_success=0        # set to 1 once we've successfully validated the command
+                    # Counters and flags for retry logic
+                    cmd_dt_tries=1               # number of times we've tried sending the command
+                    cmd_validate_tries=1         # number of times we've tried to validate, afer each command try
+                    flg_command_success=0        # set to 1 once we've successfully validated the command
 
-                        while [ $flg_command_success -eq 0 ]  && [ $cmd_dt_tries -le $cmd_retries ];
+                    # For validating schedule check we need the value of the current result of the post query
+                    # and also check if the time we asked for is after the existing next check time
+                    if [ $ng_mode = scheck ]; then
+                        ng_next_check=$(echo -e "$lql_post_query" | unixcat $env_livestatus)
+                        if [ $cmd_endtime -gt $ng_next_check ]; then
+                            flg_command_success=1
+                            datefunc unix $ng_next_check
+                            out ok "Sooner check already scheduled for: $func_time"
+                        fi
+                    fi
+
+                    while [ $flg_command_success -eq 0 ]  && [ $cmd_dt_tries -le $cmd_retries ];
+                    do
+                        out DEBUG "Sending command to $env_cmdpipe, try $cmd_dt_tries"
+                        echo -e "$ls_command" $(date +%s) > $env_cmdpipe
+                        if [ $flg_quiet -eq 0 ]; then printf "*" ; back="$back\b"; fi    # Bit of a hack for now
+                        sleep $ng_sleepZ
+                        while [ $flg_command_success -eq 0 ]  && [ $cmd_validate_tries -le $cmd_validate_retries ];
                         do
-                            out DEBUG "Sending command to $env_cmdpipe, try $cmd_dt_tries"
-                            echo -e "$ls_command" $(date +%s) > $env_cmdpipe
-                            if [ $flg_quiet -eq 0 ]; then printf "*" ; back="$back\b"; fi    # Bit of a hack for now
-                            sleep $ng_sleepZ
-                            while [ $flg_command_success -eq 0 ]  && [ $cmd_validate_tries -le $cmd_validate_retries ];
-                            do
-                                out DEBUG "Validating via $env_livestatus, try $cmd_validate_tries"
-                                lql_result=$(echo -e "$lql_post_query" | unixcat $env_livestatus)
-                                out DEBUG "Post-query result: $lql_result"
-                                if [ ${#lql_result} -gt 0 ]; then
+                            out DEBUG "Validating via $env_livestatus, try $cmd_validate_tries"
+                            lql_post_result=$(echo -e "$lql_post_query" | unixcat $env_livestatus)
+                            out DEBUG "Post-query result: $lql_post_result"
+
+                            # Generic validation - pass if post query returned anything
+                            # Works for most cases if the post query result not being null can be an indication of success
+                            if [ $ng_mode != scheck ]; then
+                                if [ ${#lql_post_result} -gt 0 ]; then
                                     if [ $flg_quiet -eq 0 ]; then
                                         printf "$back"    # Bit of a hack for now
                                         if [ $flg_service -eq 0 ]; then
-                                            out ok "Success: $targethost - result $lql_result\n"
+                                            out ok "Success: $targethost - result $lql_post_result\n"
                                         else
-                                            out ok "Success: $service on $targethost - result $lql_result\n"
+                                            out ok "Success: $service on $targethost - result $lql_post_result\n"
                                         fi
                                         flg_command_success=1
                                     else
@@ -2047,30 +2065,36 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
                                     cmd_validate_tries=$(( $cmd_validate_tries + 1 ))
                                     sleep $ng_sleepz 
                                 fi
-                            done
-                            cmd_validate_tries=1
-                            cmd_dt_tries=$(( $cmd_dt_tries + 1 ))
-                        done
-
-                        if [ $flg_command_success -eq 0 ]; then
-                            cmd_dt_tries=$(( $cmd_dt_tries - 1 ))
-                            if [ $flg_quiet -eq 0 ]; then
-                                printf "$back"    # Bit of a hack for now
-                                if [ $flg_service -eq 0 ]; then
-                                    out err "Failed: $targethost - after $cmd_dt_tries attempts\n"
-                                else
-                                    out err "Failed: $service on $targethost - after $cmd_dt_tries attempts\n"
-                                fi
-                            else
-                                out err -1
                             fi
+
+                            # Schedule service validation
+                            if [ $ng_mode = scheck ]; then
+                                # Has next check been scheduled sooner than it was? If so all good
+                                if [ $ng_next_check -gt $lql_post_result ]; then
+                                    flg_command_success=1
+                                    datefunc unix $lql_post_result
+                                    out ok "Success - new check time is $func_time"
+                                fi
+                            fi
+                        done
+                        cmd_validate_tries=1
+                        cmd_dt_tries=$(( $cmd_dt_tries + 1 ))
+                    done
+
+                    if [ $flg_command_success -eq 0 ]; then
+                        cmd_dt_tries=$(( $cmd_dt_tries - 1 ))
+                        if [ $flg_quiet -eq 0 ]; then
+                            printf "$back"    # Bit of a hack for now
+                            if [ $flg_service -eq 0 ]; then
+                                out err "Failed: $targethost - after $cmd_dt_tries attempts\n"
+                            else
+                                out err "Failed: $service on $targethost - after $cmd_dt_tries attempts\n"
+                            fi
+                        else
+                            out err -1
                         fi
-                        # end some retry logic here
-                    else
-                        # Start by being harsh
-                        out err "Trying to send command but can't write to socket"
-                        exit 1
                     fi
+                    # end some retry logic here
                 else
                     out err "Trying to send command for invalid host and/or service: $service $targethost"
                     #exit 1
@@ -2586,6 +2610,10 @@ elif [ "$ng_mode" == "query" ]; then
             ngq_result=$(echo -e "$lql\n" | unixcat $env_livestatus)
             if [ ${#ngq_result} -gt 0 ]; then
                 echo -e "$ngq_result"
+            else
+                if [ ${#ngq_null_query_response} -gt 0 ]; then
+                    echo -e "$ngq_null_query_response"
+                fi
             fi
         fi
     else
