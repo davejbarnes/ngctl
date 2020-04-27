@@ -31,7 +31,7 @@ fi
 # Some important stuff - set these to match your environment
 env_livestatus='/var/spool/nagios/cmd/live'         # live status socket for LQL queries
 env_cmdpipe='/var/log/nagios/rw/nagios.cmd'         # nagios command pipe
-env_server_prefix_regex='guea|nps|fake'             # valid prefixes for server names
+env_server_prefix_regex='prod|dr|fake'             # valid prefixes for server names
 ngq_filename=/etc/nagios/ngctlq.conf                # config file name for query mode
 
 # Hack for now - if a query returns null, return this instead

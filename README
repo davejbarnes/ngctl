@@ -26,6 +26,7 @@ ngctl currently works in several modes
  * en               Enable host or service notifications
  * dc               Disable host or service checks
  * ec               Enable host or service checks
+ * sc               Schedule host or service check
  * query            Uses the ngctlq.conf file to query Nagios via Livestatus
 
  Use:   ngctl <mode> options parameters
@@ -125,9 +126,8 @@ Not all parameters require a value.
 -Z      command pause
         a number (float), the time to pause after validating a command before trying to send the next command
 
---type      type of downtime entry to find
-            one of 'active', 'pending' or 'any', used in 'up' mode
-
+--all       schedule checking of all services on a host
+        
 --my        my downtimes entries
             in 'up' mode find only current user's entries
 
@@ -247,6 +247,35 @@ Services are specified by the -s parameter.  You can specify a single service or
     Valid examples
         -s=log_age
         -s='app_log_age app_log_backup'
+
+
+Modes
+
+Most modes require at a minimum a hostname and a user, and most will accept a service.  The exception is 'query' mode where they are accepted but not required.
+ngctl allows specifying hostnames directly, by specifying a hostgroup, or by using a hostname template and range.  Specifying services can currently only be specified directly.  Time ranges (start time and end time) can be specified as either absolute times or as an offset from 'now' or an absolute start time.  See the notes on 'Specifying hostnames', 'Specifying services' and 'Specifying the time frame'.
+If no user is specified using -u, the current logged in user's username is used (if sudo is used it should still work for bash at least).
+
+
+
+'down' Mode (add down entries)
+
+This is the default and original mode.  Adds one or more downtime entries for hosts or services on hosts.  A downtime entry needs a host, a start time and an end time, a comment and a user.  Optionally a service can be included.  
+
+
+
+'up' Mode (remove downtime entries)
+
+A search is made for downtime entries which match the parameters provided much in the same was as 'down' mode, and those found are deleted.  Durations (-d and -D) are not valid in this mode, however start time and end time parameters (-b and -e) are valid.  Use the -u parameter to only remove entries created by a specific user, or the shortcut --my to only remove entries created by the current user. (Bug: using -u affects both the query and the command; it will appear the user removed their own entry)
+
+
+
+'ack' Mode (acknowledge host or service problems)
+
+Used to add an acknowledgement to a host or service problem. Requires one or more hosts and/or services, a comment and a user.  By default an acknowledgement will not produce a notification and are not 'sticky'.  To enable notifications of acknowledgements specify -n.  To make an acknowledgement 'sticky' specify -k.  
+
+
+
+'sc' Mode
 
 
 
