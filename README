@@ -302,6 +302,7 @@ Note: ngctl does not use _FORCE_ commands, so caveats apply, see the Nagios Exte
 
 'rd' Mode
 
+Long name: remove-downtime
 Removes a downtime by it's ID.  Takes a single parameter, -i=<ID>
 
 
