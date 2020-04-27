@@ -1364,15 +1364,17 @@ if [ $ng_mode = down ] || [ $ng_mode = up ] || [ $ng_mode = scheck ]; then
 
     case "$errchk_times" in
         0)
-            if [ $ng_mode != scheck ]; then
+            if [ $ng_mode = down ]; then
                 ng_error="$ng_error\n\tNo valid time frame specified"
                 flg_error=1
             fi
             ;;
 
         4)
-            ng_error="$ng_error\n\tOnly begin time specified - cannot set and end time"
-            flg_error=1
+            if [ $ng_mode != scheck ]; then
+                ng_error="$ng_error\n\tOnly begin time specified - cannot set and end time"
+                flg_error=1
+            fi
             ;;
         
         9)
@@ -1600,11 +1602,21 @@ if [ $ng_mode = down ] || [ $ng_mode = up ] || [ $ng_mode = scheck ]; then
                 fi
                 ;;
     esac
-                out debug "Start: $cmd_starttime   End: $cmd_endtime"
-                datefunc unix $cmd_starttime
-                out debug "Start: $func_time"
-                datefunc unix $cmd_endtime
-                out debug "End:   $func_time"
+
+        if [ $ng_mode = scheck ]; then
+            datefunc absolute "$ng_begintime"
+            if [ $? -eq 0 ]; then 
+                cmd_starttime=$func_time
+            else
+                out ERR "Something has gone horribly wrong"; exit 1
+            fi
+        fi
+
+        out debug "Start: $cmd_starttime   End: $cmd_endtime"
+        datefunc unix $cmd_starttime
+        out debug "Start: $func_time"
+        datefunc unix $cmd_endtime
+        out debug "End:   $func_time"
 
 elif [ $ng_mode == query ]; then
 
@@ -1805,7 +1817,7 @@ if [ $ng_mode = scheck ]; then
         out debug "Time checks for scheck mode OK"
     elif [ $errchk_times -eq 0 ]; then
         out debug "Scheduling check for 10 seconds in the future"
-        cmd_endtime=$(date -d "10 seconds" +%s)
+        cmd_starttime=$(date -d "10 seconds" +%s)
     else
         out debug "Time checks for scheck mode FAILED"
         flg_error=1
@@ -1836,6 +1848,14 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
     noQueryParams
     noUpParams
     noRmdownParams
+
+    # -u only for up and query modes
+    if [ $ng_mode != up ] && [ $ng_mode != query ]; then
+        if [ $flg_username -eq 1 ]; then
+            flg_error=1
+            ng_error="$ng_error\n\t-u not valid in $ng_mode mode"
+        fi
+    fi
 
     # Error if ack mode specfic parameters have been specified
     if [ $ng_mode != ack ]; then
@@ -1988,11 +2008,11 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
             elif [ $ng_mode == scheck ]; then
 
                 if [ $flg_service -eq 1 ]; then
-                    ls_command="COMMAND [$(date +%s)] SCHEDULE_SVC_CHECK;$targethost;$service;$cmd_endtime\n"
+                    ls_command="COMMAND [$(date +%s)] SCHEDULE_SVC_CHECK;$targethost;$service;$cmd_starttime\n"
                     lql_pre_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nColumns: host_name\n"
                     lql_post_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nColumns: next_check\n"
                 else
-                    ls_command="COMMAND [$(date +%s)] $scheck_host_command;$targethost;$cmd_endtime\n"
+                    ls_command="COMMAND [$(date +%s)] $scheck_host_command;$targethost;$cmd_starttime\n"
                     lql_pre_query="GET hosts\nFilter: name = $targethost\nColumns: name\n"
                     lql_post_query="GET hosts\nFilter: name = $targethost\nColumns: next_check\n"
                 fi
@@ -2077,6 +2097,7 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
                                     printf "$back"
                                     out info "OK: Can't validate when scheduling ALL checks on host(s)\n"
                                 else
+                                    # You would think that -gt would make more sense here. race But condition.
                                     if [ $ng_next_check -ne $lql_post_result ]; then
                                         flg_command_success=1
                                         datefunc unix $lql_post_result
