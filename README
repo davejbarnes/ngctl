@@ -26,6 +26,7 @@ ngctl currently works in several modes
  * en               Enable host or service notifications
  * dc               Disable host or service checks
  * ec               Enable host or service checks
+ * sc               Schedule host or service check
  * query            Uses the ngctlq.conf file to query Nagios via Livestatus
 
  Use:   ngctl <mode> options parameters
@@ -125,9 +126,8 @@ Not all parameters require a value.
 -Z      command pause
         a number (float), the time to pause after validating a command before trying to send the next command
 
---type      type of downtime entry to find
-            one of 'active', 'pending' or 'any', used in 'up' mode
-
+--all       schedule checking of all services on a host
+        
 --my        my downtimes entries
             in 'up' mode find only current user's entries
 
@@ -249,10 +249,73 @@ Services are specified by the -s parameter.  You can specify a single service or
         -s='app_log_age app_log_backup'
 
 
+Modes
+
+Most modes require at a minimum a hostname, and most will accept a service.  The exception is 'query' mode where they are both accepted but not required.
+ngctl allows specifying hostnames directly using -h, by specifying a hostgroup using -H, or by using a hostname template and range.  Specifying services can currently only be specified directly; there isn't current support for servicegroups.  Time ranges (start time and end time) can be specified as either absolute times or as an offset from 'now' or an absolute start time.  
+See the notes on 'Specifying hostnames', 'Specifying services' and 'Specifying the time frame'.
+
+
+
+'down' Mode (add down entries)
+
+This is the default and original mode.  Adds one or more downtime entries for hosts or services on hosts.  A downtime entry needs a host, a start time and an end time and a comment.  Optionally a service can be included.  
+
+
+
+'up' Mode (remove downtime entries)
+
+A search is made for downtime entries which match the parameters provided much in the same was as 'down' mode, and those found are deleted.  Durations (-d and -D) are not valid in this mode, however start time and end time parameters (-b and -e) are valid.  Use the -u parameter to only remove entries created by a specific user, or the shortcut --my to only remove entries created by the current user.
+
+
+
+'ack' Mode (acknowledge host or service problems)
+
+Used to add an acknowledgement to a host or service problem. Requires one or more hosts and/or services, and a comment.  By default acknowledgements will not produce  notifications and are not 'sticky'.  To enable notifications of acknowledgements specify -n.  To make acknowledgements 'sticky' specify -k.  
+
+
+
+Enable and disable modes - ec, en, dc and dn
+
+These modes enable or disable checks or notifications for one or more hosts, or one or more services on hosts.  They are (as listed above):
+  ec  enable check(s)           long name: enable-checks
+  en  enable notification(s)    long name: enable-notifications
+  dc  disable check(s)          long name: disable-checks
+  dn  disable notification(s)   long name: disable-notifications
+
+Only hostnames/hostgroups and service names are valid as paramaters.
+
+
+
+'sc' Mode (schedule a host or service check)
+
+Long name : schedule-check
+Schedules a check of one or more hosts, or one or more services on hosts.  Requires one or more hosts, or one or more services on hosts.
+If no time paramaters are provided the default is to schdule checks 10 seconds from 'now'
+-b may be specified as an absolute time to schedule the checks.
+-d and -D may be used as an offset from 'now'.  For example -d=1 would schedule for 1 minute from 'now'
+
+If a check for the host/service is already schduled with a time sooner than specified the command will not be issued, and ngctl will exit as OK.
+Note: ngctl does not use _FORCE_ commands, so caveats apply, see the Nagios External Commands documentation.
+
+
+
+'rd' Mode
+
+Long name: remove-downtime
+Removes a downtime by it's ID.  Takes a single parameter, -i=<ID>
+
+
+
+'query' Mode
+
+Still to do.  See the ngctlq.conf file for more information.
+
+
 
 Tuning command and query speed 
 
-This does not apply to query, rd or up modes.
+This does not apply to query or rd modes.
 
 Depending on the load on your Nagios server, you might need to throttle how fast commands and queries are made, and how many times to retry. Defaults are set in the script for the parameters which control this behaviour.
 
