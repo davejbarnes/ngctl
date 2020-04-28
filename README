@@ -138,7 +138,7 @@ Not all parameters require a value.
             a space delimited string of values to be used in query mode for predefined LQL queries
             * see the included ngctlq.conf file for more details
 
---null      default output when result of a query is null
+--null      what to output when result of a query is null, instead of null
             a string. Example '0;No issues' for a service check query which normally produces no output
 
 --debug     debug level
