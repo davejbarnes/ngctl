@@ -34,8 +34,6 @@ env_cmdpipe='/var/log/nagios/rw/nagios.cmd'         # nagios command pipe
 env_server_prefix_regex='prod|dr|fake'             # valid prefixes for server names
 ngq_filename=/etc/nagios/ngctlq.conf                # config file name for query mode
 
-# Hack for now - if a query returns null, return this instead
-ngq_null_query_response="0;No query results"
 
 # For development purposes set this.  Functions that require interaction with a functioning
 # Nagios server will instead return fake data.
@@ -202,6 +200,7 @@ fnd_rangex=0
 fnd_rangey=0
 fnd_parity=0
 fnd_query=0
+fnd_nullquery=0
 fnd_filter=0
 fnd_field=0
 fnd_sleepz=0
@@ -237,6 +236,7 @@ flg_field=0             # 1 when set
 flg_sleepz=0            # 1 when set
 flg_sleepZ=0            # 1 when set
 flg_query_name=0        # 1 when set
+flg_nullquery           # 1 when set
 flg_config_filename=0   # 1 when set
 flg_state=0             # 1 when set
 flg_username=0          # 1 when set
@@ -586,6 +586,11 @@ noQueryParams() {
     if [ $flg_custom -eq 1 ] ; then
         flg_error=1
         ng_error=$(echo -e "$ng_error\n\tCustom values are not valid in $ng_mode mode")
+    fi
+
+    if [ $flg_nullquery -eq 1 ] ; then
+        flg_error=1
+        ng_error=$(echo -e "$ng_error\n\tNull query value is not valid in $ng_mode mode")
     fi
 }
 
@@ -1143,6 +1148,16 @@ do
             out DEBUG "Found -Q with value '$ng_query_name'"
         fi
 
+    elif [ "${switch:0:6}" == "--null" ]; then
+        fnd_nullquery=1
+        if [ $flg_nullquery -eq 1 ]; then
+            out DEBUG "Found and ignoring another --null"
+        else
+            flg_nullquery=1
+            ngq_null_query_response=${switch:7}
+            out DEBUG "Found --null with value '$ngq_null_query_response'"
+        fi
+
     elif [ "${switch:0:8}" == "--config" ]; then
         fnd_config_filename=1
         if [ $flg_config_filename -eq 1 ]; then
@@ -1272,6 +1287,7 @@ out debug "parity              [$ng_parity]"
 out debug "user                [$ng_username]"
 out debug "filters             [$ng_filters]"
 out debug "query name          [$ng_query_name]"
+out debug "null query value    [$ngq_null_query_response]"
 out debug "state               [$ng_state]"
 out debug "config              [$ng_config_filename]"
 out debug "custom values       [${ng_custom[@]}]"

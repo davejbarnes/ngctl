@@ -133,10 +133,13 @@ Not all parameters require a value.
 
 --config    override query config filename
             a string, a custom filename to override default ngctlq.conf file
-            
+
 --custom    custom query values
             a space delimited string of values to be used in query mode for predefined LQL queries
             * see the included ngctlq.conf file for more details
+
+--null      what to output when result of a query is null, instead of null
+            a string. Example '0;No issues' for a service check query which normally produces no output
 
 --debug     debug level
             an integer, sets the debug output level. 1 is some, 2 is all
