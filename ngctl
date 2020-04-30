@@ -236,7 +236,7 @@ flg_field=0             # 1 when set
 flg_sleepz=0            # 1 when set
 flg_sleepZ=0            # 1 when set
 flg_query_name=0        # 1 when set
-flg_nullquery           # 1 when set
+flg_nullquery=0         # 1 when set
 flg_config_filename=0   # 1 when set
 flg_state=0             # 1 when set
 flg_username=0          # 1 when set
