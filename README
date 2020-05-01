@@ -141,6 +141,10 @@ Not all parameters require a value.
 --null      what to output when result of a query is null, instead of null
             a string. Example '0;No issues' for a service check query which normally produces no output
 
+--query     specify an ad-hoc query, instead of using a predefined query
+            example: --query='GET services|Filter: state > 0|Columns: host_name description'
+            use either '|' or '\n' for new lines in the query
+
 --debug     debug level
             an integer, sets the debug output level. 1 is some, 2 is all
 
