@@ -201,6 +201,7 @@ fnd_rangey=0
 fnd_parity=0
 fnd_query=0
 fnd_nullquery=0
+fnd_custom_query=0
 fnd_filter=0
 fnd_field=0
 fnd_sleepz=0
@@ -237,6 +238,7 @@ flg_sleepz=0            # 1 when set
 flg_sleepZ=0            # 1 when set
 flg_query_name=0        # 1 when set
 flg_nullquery=0         # 1 when set
+flg_custom_query=0      # 1 when set
 flg_config_filename=0   # 1 when set
 flg_state=0             # 1 when set
 flg_username=0          # 1 when set
@@ -1158,6 +1160,17 @@ do
             out DEBUG "Found --null with value '$ngq_null_query_response'"
         fi
 
+    elif [ "${switch:0:7}" == "--query" ]; then
+        fnd_custom_query=1
+        if [ $flg_custom_query -eq 1 ]; then
+            out DEBUG "Found and ignoring another --query"
+        else
+            flg_custom_query=1
+            ngq_custom_query=${switch:8}
+            ngq_custom_query=$(echo $ngq_custom_query | sed 's/\\n/|/g')
+            out DEBUG "Found ---query with value '$ngq_custom_query'"
+        fi
+
     elif [ "${switch:0:8}" == "--config" ]; then
         fnd_config_filename=1
         if [ $flg_config_filename -eq 1 ]; then
@@ -1287,6 +1300,7 @@ out debug "parity              [$ng_parity]"
 out debug "user                [$ng_username]"
 out debug "filters             [$ng_filters]"
 out debug "query name          [$ng_query_name]"
+out debug "query               [$ngq_custom_query]"
 out debug "null query value    [$ngq_null_query_response]"
 out debug "state               [$ng_state]"
 out debug "config              [$ng_config_filename]"
@@ -2183,7 +2197,7 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
 
 elif [ "$ng_mode" == "query" ]; then
 
-    out DEBUG "query mode - fun!  Needs a query name and other parameters\n"
+    out DEBUG "query mode - Needs a query and other parameters\n"
     
     if [ $flg_quiet -eq 1 ] ; then
         flg_error=1
@@ -2214,12 +2228,18 @@ elif [ "$ng_mode" == "query" ]; then
 
 #   Check we've got a query name, unless with --list or --validate
     if [ $fnd_query_name -eq 0 ] ; then
-        if [ $flg_list -gt 0 ] || [ $flg_validate -gt 0 ]; then
+        if [ $flg_list -gt 0 ] || [ $flg_validate -gt 0 ] || [ $flg_custom_query -gt 0 ]; then
             out debug "Query name not needed"
         else        
             flg_error=1
             ng_error=$(echo -e "$ng_error\n\tRequired query name not found")
         fi
+    fi
+
+#   Check that only one of -Q or --query has been specified
+    if [ $fnd_query_name -gt 0 ] && [ $flg_custom_query -gt 0 ]; then
+        flg_error=1
+        ng_error=$(echo -e "$ng_error\n\tCan't specify -Q and --query")
     fi
 
 #   Validate what if any state we've got and convert OK|ok to 0, WARN|warn to 1, etc
@@ -2646,10 +2666,12 @@ elif [ "$ng_mode" == "query" ]; then
         exit 0
     fi
 
-    out debug "Validating configuration file $ngq_filename"
-    validateConfig
-    if [ $? -eq 0 ]; then
-        out debug "Configuration file looks valid"
+    if [ $flg_custom_query -eq 0 ]; then
+        out debug "Validating configuration file $ngq_filename"
+        validateConfig
+        if [ $? -eq 0 ]; then
+            out debug "Configuration file looks valid"
+        fi
     fi
 
     if [ $flg_list -gt 0 ]; then
@@ -2658,15 +2680,18 @@ elif [ "$ng_mode" == "query" ]; then
         exit 0
     fi
 
-    
-    buildLQL
+    if [ $flg_custom_query -eq 1 ]; then
+        lql=$(echo $ngq_custom_query | sed 's/|/\n/g')
+    else
+        buildLQL
+    fi
     if [ ${#lql} -gt 0 ]; then
         if [ $flg_test -gt 0 ] || [ $flg_verbose -gt 0 ] || [ $devMode -gt 0 ]; then
             lql="$lql\n"
             echo -e "\nGot query[\n$lql]\n"
         else 
-            out debug "Sending query"
             out DEBUG "Query:\n$lql"
+            out debug "Sending query"
             ngq_result=$(echo -e "$lql\n" | unixcat $env_livestatus)
             if [ ${#ngq_result} -gt 0 ]; then
                 echo -e "$ngq_result"
