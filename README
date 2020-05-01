@@ -11,8 +11,8 @@ It's always a work in progress, but it does work.
 Prerequisites:
     The Nagios instance must also have Livestatus installed
     The user running the command needs r/w access to both the Nagios command socket and the Livestatus pipe
-        The locations of the sock and pipe must be specified in the script
-    Normally included dependancies: grep printf unixcat (from Livestatus) 
+        ** The locations of the sock and pipe must be specified in the script **
+    Normally included dependancies: grep, printf, sed, and unixcat (from Livestatus)
 
 
 Use
@@ -205,6 +205,8 @@ You can...
 
 ngctl will remove duplicate hostnames from the list of hostnames, so if you're mixing hostgroups and hostnames only 1 downtime will be created for each host.
 
+NOTE: in query mode only one hostname and/or one hostgroup may be specified when using templates.
+
 
 
 Specifying the time frame
@@ -245,6 +247,8 @@ End time
         -b='Tomorrow 10am' -e='Tomorrow 11am'
             set downtime starting tomorrow at 10am and ending tomorrow at 11am
 
+NOTE: In query mode on -b and -e may be specified when using templates.
+
 
 
 Specifying services
@@ -254,6 +258,9 @@ Services are specified by the -s parameter.  You can specify a single service or
     Valid examples
         -s=log_age
         -s='app_log_age app_log_backup'
+
+NOTE: in query mode only 1 service may be specified when using templates
+
 
 
 Modes
@@ -316,7 +323,54 @@ Removes a downtime by it's ID.  Takes a single parameter, -i=<ID>
 
 'query' Mode
 
-Still to do.  See the ngctlq.conf file for more information.
+Allows querying Nagios via Livestatus, and outputs the raw results.
+This works in two ways.
+
+You can specify a query on the command line using the --query parameter.  This works for simple queries and those who are familiar with the LQL format.
+For example:
+    ngctl query --query='GET services|Filter: host_name = prodserver01|Filter: state > 0|Columns: description'
+would return a list containing all services which are not ok on the host 'prodserver01'
+
+
+Alternatively query templates can be pre-defined in a configuration file. In this way most ngctl parameters can be used as variables to be used as inputs to the templates.
+    Note: The default location of the configuration file is set in the script.  Use --config to specify an alternative file.
+
+The previous example might be defined in a configuration file as a query template like this:
+
+begin:bad-services-on-host
+description:Returns a list of services that are not OK for a given host
+    GET services
+    Filter: host_name = NG_HOST_NAME
+    Filter: state > 0
+    Columns: description
+end
+
+Note: NG_HOST_NAME is a variable which will be replaced by a single hostname specified by the -h parameter
+
+To get the same result the command now would be:
+    ngctl query -Q=bad-services-on-host -h=prodserver01
+
+Defining templates are useful for common and/or complexy queries, for use by users who aren't familiar with LQL, or for automation.
+The configuration file is validated before expanding a template query.  This doesn't guarantee the query is valid, only that ngctl can't see any unrecognised keywords in the query being sent. 
+
+Query templates can use the following variables:
+
+    NG_HOST_NAME      a hostname specified by -h
+    NG_HOSTGROUP      a hostgroup specified by -H
+    NG_SERVICE        a service specified by -s
+    NG_STATE          a state specified by -S
+    NG_CURRENT_USER   the current username executing the script
+    NG_USER           a username specified by -u
+    NG_UNIXTIME_B     unix time specified by -b
+    NG_UNIXTIME_E     unix time specified by -e
+    NG_CUSTOM_1       custom value 1 specified by --custom
+    NG_CUSTOM_2       custom value 2 specified by --custom
+    NG_CUSTOM_3       custom value 3 specified by --custom
+    NG_CUSTOM_4       custom value 4 specified by --custom
+    NG_CUSTOM_5       custom value 5 specified by --custom
+
+Currently multiple hostnames, hostgroups and services are not allowed.
+See the ngctlq.conf file for more information.
 
 
 
@@ -345,5 +399,3 @@ Depending on the load on your Nagios server, you might need to throttle how fast
         would send the initial command and then pause for 0.5 seconds before querying to validate success, and a further 0.5 seconds before trying to validate again. Once validation is complete (failed or not), ngctl will then pause for 1 second before sending the next command.
 
 Both the retry values and the throttle values work together if you need to tune for your install and your failure tolerance.
-
-
