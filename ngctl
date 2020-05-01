@@ -2248,7 +2248,7 @@ elif [ "$ng_mode" == "query" ]; then
     [ $fnd_parity -ne 0 ] || [ $fnd_rangex -ne 0 ] || [ $fnd_rangey -ne 0 ] || [ $fnd_service -ne 0 ] ||
     [ $fnd_state -ne 0 ] || [ $fnd_sticky -ne 0 ] || [ $fnd_username -ne 0 ] || [ $flg_my -eq 1 ] ||
     [ $flg_type -eq 1 ] || [ $flg_all -ne 0 ] || [ $fnd_dt_id -ne 0 ] || [ $flg_override -ne 0 ] ||
-    [ $flg_quiet -eq 1 ]; then
+    [ $flg_quiet -eq 1 ] && [ $flg_custom_query -gt 0 ]; then
         flg_error=1
         ng_error=$(echo -e "$ng_error\n\tIn query mode and using --query, no other parameters are valid")
     fi
