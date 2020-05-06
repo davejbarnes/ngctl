@@ -149,11 +149,14 @@ Not all parameters require a value.
             an integer, sets the debug output level. 1 is some, 2 is all
 
 --devmode   enable devmode
-            partially implemented - for testing locally without a Nagios server.
+            partially implemented - for testing locally without a Nagios server
             see the script for more information
 
 --help      help
-            show help.  Currently not up to date
+            show basic help
+
+--Help      help
+            show more detailed help (taken from this README)
 
 --list      list queries
             in query mode, list configured predefined queries
