@@ -127,6 +127,8 @@ Not all parameters require a value.
         a number (float), the time to pause after validating a command before trying to send the next command
 
 --all       schedule checking of all services on a host
+
+--force     force scheduling of host or service checks
         
 --my        my downtimes entries
             in 'up' mode find only current user's entries

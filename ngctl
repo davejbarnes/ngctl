@@ -474,6 +474,7 @@ flg_sticky=0
 flg_notify=0
 flg_my=0
 flg_all=0
+flg_force=0
 
 # Initialise some misc variables
 ng_error="\nValidation error(s)"
@@ -777,6 +778,10 @@ noScheckParams(){
         flg_error=1
         ng_error=$(echo -e "$ng_error\n\tAll is not valid in $ng_mode mode")
     fi
+    if [ $flg_force -eq 1 ] ; then
+        flg_error=1
+        ng_error=$(echo -e "$ng_error\n\tForce is not valid in $ng_mode mode")
+    fi
 }
 
 # Sets flg_error to 1 if any rmdown specific parameters are set
@@ -930,6 +935,10 @@ do
     elif [ "${switch}" == "--all" ]; then
         flg_all=1
         out DEBUG "Found --all"
+
+    elif [ "${switch}" == "--force" ]; then
+        flg_force=1
+        out DEBUG "Found --force"
 
     elif [ "${switch}" == "--list" ]; then
         flg_list=1
@@ -1555,7 +1564,7 @@ if [ $ng_mode = down ] || [ $ng_mode = up ] || [ $ng_mode = scheck ]; then
             ;;
 
         4)
-            if [ $ng_mode != scheck ]; then
+            if [ $ng_mode != scheck ] && [ $ng_mode != up ] ; then
                 ng_error="$ng_error\n\tOnly begin time specified - cannot set and end time"
                 flg_error=1
             fi
@@ -1667,6 +1676,17 @@ if [ $ng_mode = down ] || [ $ng_mode = up ] || [ $ng_mode = scheck ]; then
                     out ERR "Start time is after end time"; exit 1
                 else
                     comb_time=1
+                fi
+                ;;
+
+        4)      #4 - begin only, valid for scheck and up modes
+                if [ $ng_mode == scheck ] || [ $ng_mode == up ] ; then
+                    datefunc absolute "$ng_begintime"
+                    if [ $? -eq 0 ]; then 
+                        cmd_starttime=$func_time
+                    else
+                        out ERR "Something has gone horribly wrong"; exit 1
+                    fi
                 fi
                 ;;
 
@@ -2048,29 +2068,45 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
 
     # ack mode checks
     if [ $ng_mode == ack ]; then
-        out DEBUG "Beginning ACK mode checks\n"
+        out DEBUG "Beginning ACK mode checks"
         if [ ${#cmd_targets} -eq 0 ] && [ ${#cmd_services} -eq 0 ]; then
             flg_error=1
             ng_error="$ng_error\n\tNothing to acknowledge"
         fi
 
         # If generic errors or specific errors were found, report them and exit
-        if [ $flg_error -eq 1 ]; then out err "$ng_error"; exit 1; fi
+        # if [ $flg_error -eq 1 ]; then out err "$ng_error"; exit 1; fi
 
         out DEBUG "Finished error checking in ACK mode"
     fi
 
     # scheck mode checks
     if [ $ng_mode == scheck ]; then
-        scheck_host_command="SCHEDULE_HOST_CHECK"
-        if [ $flg_all -eq 1 ]; then
-            scheck_host_command="SCHEDULE_HOST_SVC_CHECKS"
+        out DEBUG "Beginning SC mode checks"
+        if [ $flg_force -eq 0 ]; then
+            scheck_host_command="SCHEDULE_HOST_CHECK"
+            scheck_service_command="SCHEDULE_SVC_CHECK"
+            if [ $flg_all -eq 1 ]; then
+                scheck_host_command="SCHEDULE_HOST_SVC_CHECKS"
+            fi
+        else
+            scheck_host_command="SCHEDULE_FORCED_HOST_CHECK"
+            scheck_service_command="SCHEDULE_FORCED_SVC_CHECK"
+            if [ $flg_all -eq 1 ]; then
+                scheck_host_command="SCHEDULE_FORCED_HOST_SVC_CHECKS"
+            fi
         fi
-        out DEBUG "scheck_host_command is $scheck_host_command"
+        out DEBUG "scheck_host_command is\t$scheck_host_command"
+        out DEBUG "scheck_service_command is\t$scheck_service_command"
+        if [ $flg_service -eq 1 ] && [ $flg_all -eq 1 ]; then
+            flg_error=1
+            ng_error="$ng_error\n\tCan't use --all when specifying services"
+        fi
     fi
     if [ $ng_mode != scheck ]; then
         noScheckParams
     fi
+    out DEBUG "Finished error checking in SC mode"
 
     # If generic errors or specific errors were found, report them and exit
     if [ $flg_error -eq 1 ]; then out err "$ng_error"; exit 1; fi
@@ -2192,7 +2228,7 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
             elif [ $ng_mode == scheck ]; then
 
                 if [ $flg_service -eq 1 ]; then
-                    ls_command="COMMAND [$(date +%s)] SCHEDULE_SVC_CHECK;$targethost;$service;$cmd_starttime\n"
+                    ls_command="COMMAND [$(date +%s)] $scheck_service_command;$targethost;$service;$cmd_starttime\n"
                     lql_pre_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nColumns: host_name\n"
                     lql_post_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nColumns: next_check\n"
                 else
@@ -2226,14 +2262,19 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
                     flg_command_success=0        # set to 1 once we've successfully validated the command
 
                     # For validating schedule check we need the value of the current result of the post query
-                    # and also check if the time we asked for is after the existing next check time
+                    # and also check if the time we asked for is after the existing next check time,
+                    # unless --force is used
                     if [ $ng_mode = scheck ]; then
-                        ng_next_check=$(echo -e "$lql_post_query" | unixcat $env_livestatus)
-                        out DEBUG "Next check current value: $ng_next_check"
-                        if [ $cmd_endtime -gt $ng_next_check ]; then
-                            flg_command_success=1
-                            datefunc unix $ng_next_check
-                            out ok "Sooner check already scheduled for: $func_time\n"
+                        if [ $flg_force -eq 0 ]; then
+                            ng_next_check=$(echo -e "$lql_post_query" | unixcat $env_livestatus)
+                            out DEBUG "Next check current value: $ng_next_check"
+                            if [ $cmd_endtime -gt $ng_next_check ]; then
+                                flg_command_success=1
+                                datefunc unix $ng_next_check
+                                out ok "Sooner check already scheduled for: $func_time\n"
+                            fi
+                        else
+                            out DEBUG "Not checking next scheduled check, --force used"
                         fi
                     fi
 
@@ -2961,13 +3002,13 @@ elif [ "$ng_mode" == "up" ]; then
     fi
 
     if [ $fnd_begintime -eq 1 ]; then
-        datefunc absolute $cmd_starttime
-        ng_up_query="$ng_up_query\nFilter: start_time = $func_time"
+        #datefunc absolute $cmd_starttime
+        ng_up_query="$ng_up_query\nFilter: start_time = $cmd_starttime"
     fi
 
     if [ $fnd_endtime -eq 1 ]; then
-        datefunc absolute $cmd_endtime
-        ng_up_query="$ng_up_query\nFilter: end_time = $func_time"
+        #datefunc absolute $cmd_endtime
+        ng_up_query="$ng_up_query\nFilter: end_time = $cmd_endtime"
     fi
 
     if [ $fnd_username -eq 1 ]; then
