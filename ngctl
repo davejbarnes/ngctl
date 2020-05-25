@@ -1401,7 +1401,7 @@ if [ $ng_mode = down ] || [ $ng_mode = up ] || [ $ng_mode = scheck ]; then
             ;;
 
         4)
-            if [ $ng_mode != scheck ]; then
+            if [ $ng_mode != scheck ] && [ $ng_mode != up ] ; then
                 ng_error="$ng_error\n\tOnly begin time specified - cannot set and end time"
                 flg_error=1
             fi
@@ -1513,6 +1513,17 @@ if [ $ng_mode = down ] || [ $ng_mode = up ] || [ $ng_mode = scheck ]; then
                     out ERR "Start time is after end time"; exit 1
                 else
                     comb_time=1
+                fi
+                ;;
+
+        4)      #4 - begin only, valid for scheck and up modes
+                if [ $ng_mode == scheck ] || [ $ng_mode == up ] ; then
+                    datefunc absolute "$ng_begintime"
+                    if [ $? -eq 0 ]; then 
+                        cmd_starttime=$func_time
+                    else
+                        out ERR "Something has gone horribly wrong"; exit 1
+                    fi
                 fi
                 ;;
 
@@ -2807,13 +2818,13 @@ elif [ "$ng_mode" == "up" ]; then
     fi
 
     if [ $fnd_begintime -eq 1 ]; then
-        datefunc absolute $cmd_starttime
-        ng_up_query="$ng_up_query\nFilter: start_time = $func_time"
+        #datefunc absolute $cmd_starttime
+        ng_up_query="$ng_up_query\nFilter: start_time = $cmd_starttime"
     fi
 
     if [ $fnd_endtime -eq 1 ]; then
-        datefunc absolute $cmd_endtime
-        ng_up_query="$ng_up_query\nFilter: end_time = $func_time"
+        #datefunc absolute $cmd_endtime
+        ng_up_query="$ng_up_query\nFilter: end_time = $cmd_endtime"
     fi
 
     if [ $fnd_username -eq 1 ]; then
