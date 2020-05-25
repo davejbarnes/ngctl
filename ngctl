@@ -371,7 +371,8 @@ help-detailed (){
     printf "\n"
     printf "  --query     specify LQL query, instead of using a predefined query\n"
     printf "              example: --query='GET services|Filter: state > 0|Columns: host_name description'\n"
-    printf "              use either '|' or '\n' for new lines in the query"
+    # using echo here is on purpose
+    echo "              use either '|' or '\n' for new lines in the query"
     printf "\n"
     printf "  --debug     debug level\n"
     printf "              an integer, sets the debug output level. 1 is some, 2 is all\n"
