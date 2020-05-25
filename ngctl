@@ -234,6 +234,7 @@ help-basic (){
     printf "  -Z      command pause\n"
     printf "\n"
     printf "  --all       schedule checking of all services on a host\n"
+    printf "  --force     force scheduling of checks on host or services\n"
     printf "  --my        my downtimes entries ('up' mode)\n"
     printf "  --config    override query config filename\n"
     printf "  --custom    custom query values\n"
@@ -353,6 +354,8 @@ help-detailed (){
     printf "\n"
     printf "  --all       schedule checking of all services on a host\n"
     printf "\n"
+    printf "  --force     force scheduling of checks on host or services\n"
+    printf "\n"
     printf "  --my        my downtimes entries\n"
     printf "              in 'up' mode find only current user's entries\n"
     printf "\n"
@@ -368,7 +371,7 @@ help-detailed (){
     printf "\n"
     printf "  --query     specify LQL query, instead of using a predefined query\n"
     printf "              example: --query='GET services|Filter: state > 0|Columns: host_name description'\n"
-    echo "              use either '|' or '\n' for new lines in the query"
+    printf "              use either '|' or '\n' for new lines in the query"
     printf "\n"
     printf "  --debug     debug level\n"
     printf "              an integer, sets the debug output level. 1 is some, 2 is all\n"
@@ -1807,20 +1810,20 @@ if [ $ng_mode = down ] || [ $ng_mode = up ] || [ $ng_mode = scheck ]; then
                 ;;
     esac
 
-        if [ $ng_mode = scheck ]; then
-            datefunc absolute "$ng_begintime"
-            if [ $? -eq 0 ]; then 
-                cmd_starttime=$func_time
-            else
-                out ERR "Something has gone horribly wrong"; exit 1
-            fi
+    if [ $ng_mode = scheck ]; then
+        datefunc absolute "$ng_begintime"
+        if [ $? -eq 0 ]; then 
+            cmd_starttime=$func_time
+        else
+            out ERR "Something has gone horribly wrong"; exit 1
         fi
+    fi
 
-        out debug "Start: $cmd_starttime   End: $cmd_endtime"
-        datefunc unix $cmd_starttime
-        out debug "Start: $func_time"
-        datefunc unix $cmd_endtime
-        out debug "End:   $func_time"
+    out debug "Start: $cmd_starttime   End: $cmd_endtime"
+    datefunc unix $cmd_starttime
+    out debug "Start: $func_time"
+    datefunc unix $cmd_endtime
+    out debug "End:   $func_time"
 
 elif [ $ng_mode == query ]; then
 
