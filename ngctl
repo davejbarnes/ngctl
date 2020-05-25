@@ -181,6 +181,221 @@ case "$1" in
 
 esac
 
+# ---------------------------------------------------------------------------------------------------------
+#  Help sections
+
+help-basic (){
+    printf "$fg_bold"Use:"$fbg_reset ngctl [mode] [parameters]\n"
+    printf "\n"
+    printf "(ngctl --Help for more detailed help)\n"
+    printf "\n"
+    printf "$fg_bold"Modes"$fbg_reset\n"
+    printf "  $fg_bold*$fbg_reset down    add a host or service downtime\n"
+    printf "  $fg_bold*$fbg_reset up      remove a host or service downtime\n"
+    printf "  $fg_bold*$fbg_reset rd      remove a host or service downtime by ID\n"
+    printf "  $fg_bold*$fbg_reset ack     acknowledge host or service problems\n"
+    printf "  $fg_bold*$fbg_reset dn      Disable host or service notifications\n"
+    printf "  $fg_bold*$fbg_reset en      Enable host or service notifications\n"
+    printf "  $fg_bold*$fbg_reset dc      Disable host or service checks\n"
+    printf "  $fg_bold*$fbg_reset ec      Enable host or service checks\n"
+    printf "  $fg_bold*$fbg_reset sc      Schedule host or service check\n"
+    printf "  $fg_bold*$fbg_reset query   Query Nagios using LQL\n"
+    printf "\n"
+    printf "$fg_bold"Parameters"$fbg_reset\n"
+    printf "  $fg_underline"Note:"$fbg_reset parameters with values must be specified by parameter=value, e.g. -x=1\n"
+    printf "          not all parameters require a value, e.g. -v\n"
+    printf "\n"
+    printf "\n"
+    printf "  -b      begin time of a downtime\n"
+    printf "  -c      comment\n"
+    printf "  -d      duration in minutes\n"
+    printf "  -D      duration in hours\n"
+    printf "  -e      end time of a downtime\n"
+    printf "  -h      hostname or hostname template\n"
+    printf "  -H      hostgroup name\n"
+    printf "  -i      downtime ID\n"
+    printf "  -k      sticky acknowledge\n"
+    printf "  -n      notify acknowledge\n"
+    printf "  -o      override hostname validation\n"
+    printf "  -p      parity of range\n"
+    printf "  -q      quiet\n"
+    printf "  -Q      query name\n"
+    printf "  -r      command retries\n"
+    printf "  -R      validate retries \n"
+    printf "  -s      service description\n"
+    printf "  -S      state\n"
+    printf "  -t      test parameter use\n"
+    printf "  -u      username\n"
+    printf "  -v      verbose\n"
+    printf "  -V      very verbose\n"
+    printf "  -x      range start\n"
+    printf "  -y      range end\n"
+    printf "  -z      validate pause\n"
+    printf "  -Z      command pause\n"
+    printf "\n"
+    printf "  --all       schedule checking of all services on a host\n"
+    printf "  --force     force scheduling of checks on host or services\n"
+    printf "  --my        my downtimes entries ('up' mode)\n"
+    printf "  --config    override query config filename\n"
+    printf "  --custom    custom query values\n"
+    printf "  --null      output when result of a query is null\n"
+    printf "  --query     LQL query\n"
+    printf "  --debug     debug level\n"
+    printf "  --help      help\n"
+    printf "  --list      list pre-defined queries\n"
+    printf "  --validate  validate query config file\n"
+}
+
+help-detailed (){
+    printf "$fg_bold"Use:"$fbg_reset ngctl [mode] [parameters]\n"
+    printf "\n"
+    printf "$fg_bold"Modes"$fbg_reset\n"
+    printf "  $fg_bold*$fbg_reset down    add a host or service downtime\n"
+    printf "  $fg_bold*$fbg_reset up      remove a host or service downtime\n"
+    printf "  $fg_bold*$fbg_reset rd      remove a host or service downtime by ID\n"
+    printf "  $fg_bold*$fbg_reset ack     acknowledge host or service problems\n"
+    printf "  $fg_bold*$fbg_reset dn      Disable host or service notifications\n"
+    printf "  $fg_bold*$fbg_reset en      Enable host or service notifications\n"
+    printf "  $fg_bold*$fbg_reset dc      Disable host or service checks\n"
+    printf "  $fg_bold*$fbg_reset ec      Enable host or service checks\n"
+    printf "  $fg_bold*$fbg_reset sc      Schedule host or service check\n"
+    printf "  $fg_bold*$fbg_reset query   Query Nagios using LQL\n"
+    printf "\n"
+    printf "$fg_bold"Parameters"$fbg_reset\n"
+    printf "  $fg_underline"Note:"$fbg_reset parameters with values must be specified by parameter=value, e.g. -x=1\n"
+    printf "          not all parameters require a value, e.g. -v\n"
+    printf "\n"
+    printf "  -b      begin time of a downtime\n"
+    printf "          a string representing a time compatible with the 'date' command\n"
+    printf "          Examples:   -b='Tomorrow 8am'\n"
+    printf "                      -b='2019-10-31 8:00'\n"
+    printf "\n"
+    printf "  -c      comment\n"
+    printf "          a string, required for setting downtimes or acknowledging problems\n"
+    printf "\n"
+    printf "  -d      duration in minutes\n"
+    printf "          an integer (not valid if an end time is also specified)\n"
+    printf "\n"
+    printf "  -D      duration in hours\n"
+    printf "          an integer (not valid if an end time is also specified)\n"
+    printf "\n"
+    printf "  -e      end time of a downtime\n"
+    printf "          a string representing a time compatible with the 'date' command (not valid if duration in hours and/or minutes is also specified)\n"
+    printf "\n"
+    printf "  -h      hostname or hostname template\n"
+    printf "          a string which begins with the configured prefixes. Can be specified multiple times for a hostname, or can be a quoted space delimited list of hostnames\n"
+    printf "          If the hostname doesn't end with a number it will be treated as a hostname template, and can only be specified once\n"
+    printf "          hostname templates require -x and -y and optionally -p may be specified\n"
+    printf "\n"
+    printf "  -H      hostgroup name\n"
+    printf "          a string which is a Nagios hostgroup. Can be specified multiple times, or can be a quoted space delimited list of hostgroups\n"
+    printf "          hostgroup can't be specified with a hostname template\n"
+    printf "\n"
+    printf "  -i      downtime ID\n"
+    printf "          the ID of a downtime entry to remove\n"
+    printf "\n"
+    printf "  -k      sticky acknowledge\n"
+    printf "          denotes an acknowledge command should be 'sticky'\n"
+    printf "\n"
+    printf "  -n      notify acknowledge\n"
+    printf "          denotes an acknowledge command should be notify\n"
+    printf "\n"
+    printf "  -o      override\n"
+    printf "          Denotes that hostname format checks should be ignored. Also disables templates and invalidates -x -y -p parameters\n"
+    printf "\n"
+    printf "  -p      parity\n"
+    printf "          a string, eith "odd" or "even"\n"
+    printf "          Only valid when specifying a hostname template - requires -x and -y\n"
+    printf "\n"
+    printf "  -q      quiet\n"
+    printf "          Denotes that output should be limited\n"
+    printf "\n"
+    printf "  -Q      query name\n"
+    printf "          the name of the predefined LQL query\n"
+    printf "          Requires ngctlq.conf \n"
+    printf "\n"
+    printf "  -r      command retries\n"
+    printf "          integer, number of times to retry sending a command to Nagios\n"
+    printf "\n"
+    printf "  -R      validate retries \n"
+    printf "          integer, number of times to try validating a command was successful\n"
+    printf "          this applies after each try as specified by -r \n"
+    printf "\n"
+    printf "  -s      service description\n"
+    printf "          a string, the service description (aka name). Can be specified multiple times, or can be a quoted space delimited list of services\n"
+    printf "\n"
+    printf "  -S      state\n"
+    printf "          either an integer between 0 and 3, or a string - one of OK WARN CRIT UNK (ok warn crit unk)\n"
+    printf "          only valid in query mode\n"
+    printf "\n"
+    printf "  -t      test\n"
+    printf "          denotes test mode.  No commands will be executed - used for checking parameter interpretation and validity\n"
+    printf "\n"
+    printf "  -u      username\n"
+    printf "          a string, the username to use in query mode or up mode\n"
+    printf "\n"
+    printf "  -v      verbose\n"
+    printf "          denotes output should be verbose\n"
+    printf "\n"
+    printf "  -V      very verbose\n"
+    printf "          denotes output should be very verbose\n"
+    printf "\n"
+    printf "  -x      range start\n"
+    printf "          an integer, the start number for a hostname template. Requires -y\n"
+    printf "\n"
+    printf "  -y      range end\n"
+    printf "          an integer, the end number for a hostname template. Requires -x\n"
+    printf "\n"
+    printf "  -z      validate pause\n"
+    printf "          a number (float), the time to pause after sending a command before trying to validate it's success\n"
+    printf "\n"
+    printf "  -Z      command pause\n"
+    printf "          a number (float), the time to pause after validating a command before trying to send the next command\n"
+    printf "\n"
+    printf "  --all       schedule checking of all services on a host\n"
+    printf "\n"
+    printf "  --force     force scheduling of checks on host or services\n"
+    printf "\n"
+    printf "  --my        my downtimes entries\n"
+    printf "              in 'up' mode find only current user's entries\n"
+    printf "\n"
+    printf "  --config    override query config filename\n"
+    printf "              a string, a custom filename to override default ngctlq.conf file\n"
+    printf "\n"
+    printf "  --custom    custom query values\n"
+    printf "              a space delimited string of values to be used in query mode for predefined LQL queries\n"
+    printf "              * see the included ngctlq.conf file for more details\n"
+    printf "\n"
+    printf "  --null      what to output when result of a query is null, instead of null\n"
+    printf "              a string. Example '0;No issues' for a service check query which normally produces no output\n"
+    printf "\n"
+    printf "  --query     specify LQL query, instead of using a predefined query\n"
+    printf "              example: --query='GET services|Filter: state > 0|Columns: host_name description'\n"
+    # using echo here is on purpose
+    echo "              use either '|' or '\n' for new lines in the query"
+    printf "\n"
+    printf "  --debug     debug level\n"
+    printf "              an integer, sets the debug output level. 1 is some, 2 is all\n"
+    printf "\n"
+    printf "  --devmode   enable devmode\n"
+    printf "              partially implemented - for testing locally without a Nagios server.\n"
+    printf "              see the script for more information\n"
+    printf "\n"
+    printf "  --help      basic help\n"
+    printf "\n"
+    printf "  --Help      extended help\n"
+    printf "\n"
+    printf "  --list      list queries\n"
+    printf "              in query mode, list configured predefined queries\n"
+    printf "\n"
+    printf "  --validate  validate query config file\n"
+    printf "              validtaes that the specified ngctlq.conf file is valid\n"
+    printf "\n"    
+}
+
+# ---------------------------------------------------------------------------------------------------------
+
+
 out DEBUG "Lots of debug enabled!"
 out debug "Got parameters: $@"
 
@@ -498,67 +713,6 @@ getHostsbygroup (){
     fi
 }
 
-# showHelp() does just that
-showHelp (){
-    echo -e "$fg_bold$fg_underline$fg_green""ngctl help$fbg_reset"
-    echo -e ""
-    echo -e "Setting a downtime requires one or more hostnames, a start time, an end time, a comment and optionally one or more service names"
-    #echo -e ""
-    #echo -e "$fg_bold$fg_blue""parameters:$fbg_reset"
-    echo -e ""
-    echo -e "$fg_blue$fg_underline$fg_bold""Specify one or more hostnames$fbg_reset"
-    echo -e ""
-    echo -e "    $fg_bold""Either$fbg_reset"
-    echo -e "    -h      a hostname or a quoted space delimited list of hostnames. Can be specified multiple times. Can be specified along with -H"
-    echo -e "    -H      a hostgroup name or a quoted space delimited list of hostgroup names. Can be specified multiple times. Can be specified along with -h "
-    echo -e ""
-    echo -e "    $fg_bold""Or$fbg_reset"
-    echo -e "    -h      a valid hostname without the 2-3 digit suffix to be used as a template, requires a range (see -x -y -p)"
-    echo -e "    -p      parity used when -h has specified a hostname as a template. Optional, either odd or even "
-    echo -e "    -x      start of range used when -h has specified a hostname as a template"
-    echo -e "    -y      end of range used when -h has specified a hostname as a template"
-    echo -e ""
-    echo -e "$fg_blue$fg_underline$fg_bold""Start and end times$fbg_reset"
-    echo -e ""
-    echo -e "    -b      optional begin time, GNU 'date' compatible string. $fg_bold$fg_underline""If not specified \"now\" will be assumed$fbg_reset"
-    echo -e "    -e      end time, GNU 'date' compatible string, can't be used with -d or -D "
-    echo -e "    -d      duration in minutes, can't be used with -e "
-    echo -e "    -D      duration in hours, can't be used with -e "
-    echo -e ""
-    echo -e "$fg_blue$fg_underline$fg_bold""Specify one or more services (optional)$fbg_reset"
-    echo -e ""
-    echo -e "    -s      a service name or a quoted space delimited list of service names, can be specified multiple times"
-    echo -e "            $fg_bold""When specified the service will be downtimed NOT the host$fbg_reset"
-    echo -e ""
-    echo -e "$fg_blue$fg_underline$fg_bold""Specify the comment$fbg_reset"
-    echo -e ""
-    echo -e "    -c      comment, quoted string at least 10 characters"
-    echo -e ""
-    echo -e "$fg_blue$fg_underline$fg_bold""Other parameters$fbg_reset"
-    echo -e ""
-    echo -e "    -q      quiet - only output ID of downtime. Outputs -1 if not found or failed"
-    echo -e "    -t      test - do everything apart from send command"
-    echo -e "    -v      verbose - output the commands sent"
-    echo -e "    -V      very verbose - as -v but also explain parameter interpretation"
-    echo -e "    -z      sleep time in seconds between sending commands - default 0"
-    echo -e "    -Z      sleep time in seconds before verifying - default 5"
-    echo -e ""
-    echo -e "    --help  display extended help for mode - defaults to mode downtime"
-    echo -e "    --debug display debug info - values 1 (normal) or 2 (extended), default 0"
-    echo -e ""
-
-    if [ $st_debug -gt 0 ]; then
-        echo -e "    --devMode=1   Won't try and interact with Live Status, but will generate succsessful fake data for -H"
-        echo -e "    --devMode=2   Won't try and interact with Live Status, but will generate failed fake data for -H"
-        echo -e "                  If you're wanting to add functionality, consider generating fake data as an option of your function"
-        echo -e "                  as it makes it easier to develop without access to a live nagios/CheckMK setup"
-        echo -e ""
-        echo -e "                  Also please make use of 'out debug' and 'out DEBUG' for troubleshooting"
-    fi
-    echo -e "$fg_yellow""Note: duplicate hostnames and/or service names are discarded ('-h=prodserver01 -H=prodservers' matches 'prodserver01' once) $fbg_reset"
-    echo -e "$fg_yellow""Note: currently it is assumed all hostnames adhere to a set prefix ($env_server_prefix_regex) and 2-3 digits suffix  (eg. prodsomething01, drotherthing22)$fbg_reset"
-}
-
 # Sets flg_error to 1 if any query specific parameters are set
 noQueryParams() {
     if [ $flg_config_filename -eq 1 ] ; then
@@ -738,8 +892,16 @@ for switch in "$@"
 do
     if [ "${switch}" == "--help" ]; then
         out DEBUG "Found --help"
-        out DEBUG "Showing help then quitting"
-        showHelp
+        out DEBUG "Showing help-basic then quitting"
+        flg_help=1
+        help-basic
+        exit 0
+
+    elif [ "${switch}" == "--Help" ]; then
+        out DEBUG "Found --Help"
+        out DEBUG "Showing help-detailed then quitting"
+        flg_fullhelp=1
+        help-detailed
         exit 0
 
     elif [ "${switch}" == "-v" ]; then
@@ -757,10 +919,6 @@ do
     elif [ "${switch}" == "-q" ]; then
         flg_quiet=1
         out DEBUG "Found -q"
-
-    elif [ "${switch}" == "--help" ]; then
-        flg_fullhelp=1
-        out DEBUG "Found --help"
 
     elif [ "${switch}" == "-o" ]; then
         flg_override=1
@@ -1653,20 +1811,20 @@ if [ $ng_mode = down ] || [ $ng_mode = up ] || [ $ng_mode = scheck ]; then
                 ;;
     esac
 
-        if [ $ng_mode = scheck ]; then
-            datefunc absolute "$ng_begintime"
-            if [ $? -eq 0 ]; then 
-                cmd_starttime=$func_time
-            else
-                out ERR "Something has gone horribly wrong"; exit 1
-            fi
+    if [ $ng_mode = scheck ]; then
+        datefunc absolute "$ng_begintime"
+        if [ $? -eq 0 ]; then 
+            cmd_starttime=$func_time
+        else
+            out ERR "Something has gone horribly wrong"; exit 1
         fi
+    fi
 
-        out debug "Start: $cmd_starttime   End: $cmd_endtime"
-        datefunc unix $cmd_starttime
-        out debug "Start: $func_time"
-        datefunc unix $cmd_endtime
-        out debug "End:   $func_time"
+    out debug "Start: $cmd_starttime   End: $cmd_endtime"
+    datefunc unix $cmd_starttime
+    out debug "Start: $func_time"
+    datefunc unix $cmd_endtime
+    out debug "End:   $func_time"
 
 elif [ $ng_mode == query ]; then
 
@@ -2904,3 +3062,4 @@ elif [ "$ng_mode" == "up" ]; then
     if [ $flg_error -eq 1 ]; then out err "$ng_error"; exit 1; fi
 
 fi
+
