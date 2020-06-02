@@ -2326,7 +2326,8 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
                                     printf "$back"
                                     out info "OK: Can't validate when scheduling ALL checks on host(s)\n"
                                 elif [ $flg_force -eq 1 ]; then
-                                    # Don't validate when using --force
+                                    # --force can be used when specifying a date/time so validation
+                                    # of next check time doesn't make sense
                                     flg_command_success=1
                                     datefunc unix $lql_post_result
                                     printf "$back"
