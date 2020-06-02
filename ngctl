@@ -2325,6 +2325,13 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
                                     flg_command_success=1
                                     printf "$back"
                                     out info "OK: Can't validate when scheduling ALL checks on host(s)\n"
+                                elif [ $flg_force -eq 1 ]; then
+                                    # --force can be used when specifying a date/time so validation
+                                    # of next check time doesn't make sense
+                                    flg_command_success=1
+                                    datefunc unix $lql_post_result
+                                    printf "$back"
+                                    out info "OK: Next check time is $func_time\n"
                                 else
                                     # You would think that -gt would make more sense here. race But condition.
                                     if [ $ng_next_check -ne $lql_post_result ]; then
