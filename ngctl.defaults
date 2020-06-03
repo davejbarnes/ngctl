@@ -1,0 +1,8 @@
+env_livestatus='/var/spool/nagios/cmd/live'
+env_cmdpipe='/var/log/nagios/rw/nagios.cmd'
+env_server_prefix_regex='prod|dr|fake'
+ngq_filename='/etc/nagios/ngctlq.conf'
+ng_sleepz=0.5
+ng_sleepZ=0.1
+ng_retry=5
+ng_validation_retry=3
