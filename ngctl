@@ -514,6 +514,7 @@ hostgroup_hosts=''      # used by getHostsbyhostgroup() to set the list of hostn
 # Now check if a 'defaults' file is specified
 # This can be used to override one or more of the defaults defined
 # above. Use with caution as changing some will have weird effects.
+# If it isn't in the provided ngctl.defaults it's probably a bad idea.
 
 # First check for /etc/ngctl.defaults and load it if it's there
 if [ -r /etc/ngctl.defaults ]; then
