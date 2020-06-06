@@ -29,6 +29,8 @@ if [ $? -eq 0 ]; then
 fi
 
 # Some important stuff - set these to match your environment
+# Use --defaults to specify an override config file, or create
+# a defaults file '/etc/ngctl.defaults' or './ngctld.efaults' ( code search: # SETTING_DEFAULTS)
 env_livestatus='/var/spool/nagios/cmd/live'         # live status socket for LQL queries
 env_cmdpipe='/var/log/nagios/rw/nagios.cmd'         # nagios command pipe
 env_server_prefix_regex='prod|dr|fake'             # valid prefixes for server names
@@ -508,14 +510,78 @@ func_time=0             # used by datefunc() to return it's value
 hostgroup_hosts=''      # used by getHostsbyhostgroup() to set the list of hostnames
 
 
+load_config() {
+    allowed_vars="env_livestatus env_cmdpipe env_server_prefix_regex ngq_filename ng_sleepz ng_sleepZ ng_retry ng_validation_retry"
+    for i in $allowed_vars; do
+        cvar=$(grep ^$i= $1)
+        if [ $? -eq 0 ]; then
+            out DEBUG "Setting value $i from $1 ($cvar)"
+            eval $cvar
+        fi
+    done
+}
+
+# SETTING_DEFAULTS
+# Now check if a 'defaults' file is specified
+# This can be used to override one or more of the defaults defined
+# above. Use with caution as changing some will have weird effects.
+# If it isn't in the provided ngctl.defaults it's probably a bad idea.
+
+# Precedence of ngctl.defaults: local directory first, then /etc/ngctl.defaults,
+# then a specified file. Last set wins.
+
+# First check for ./ngctl.defaults and load it if it's there
+if [ -r ./ngctl.defaults ]; then
+    out DEBUG "Loading local file ./ngctl.defaults - if it breaks don't blame ngctl!"
+    load_config ./ngctl.defaults
+else
+    out DEBUG "Defaults file ./ngctl.defaults doesn't exist or is not accessible"
+fi
+
+# Next check for /etc/ngctl.defaults and load it if it's there
+if [ -r /etc/ngctl.defaults ]; then
+    out DEBUG "Loading system file /etc/ngctl.defaults - if it breaks don't blame ngctl!"
+    load_config /etc/ngctl.defaults
+else
+    out DEBUG "Defaults file /etc/ngctl.defaults doesn't exist or is not accessible"
+fi
+
+# Finally check if another defaults file has been specified
+# This will override any previously defined defaults
+fnd_defaults=0
+flg_defaults=0
+for switch in "$@"
+do
+    if [ "${switch:0:10}" == "--defaults" ]; then
+        fnd_defaults=1
+        if [ $flg_defaults -eq 1 ]; then
+            out DEBUG "Found and ignoring another -defaults"
+        else
+            flg_defaults=1
+            ng_defaults=${switch:11}
+            out DEBUG "Found --defaults with value '$ng_defaults'"
+        fi
+    fi
+done
+
+if [ $flg_defaults -eq 1 ]; then
+    if [ -r $ng_defaults ]; then
+        out DEBUG "Loading specified file $ng_defaults - if it breaks don't blame ngctl!"
+        load_config $ng_defaults
+    else
+        # If the file doesn't exist, exit immediately - unexpected results on the Nagios
+        # instance might occur if overrides were not loaded as expected.
+        out ERR "Defaults file $ng_defaults doesn't exist or is not accessible"
+        exit 1
+    fi
+fi
+
 # Some functions we need for various things
 # We're only using functions where it doesn't obfuscate the flow too much, and provides an advantage in not replicating code;
 # it should still be readable either immediately or having looked at the function once.
 
 # For example:  dedupe $array
 # hopefully indicates that the 'dedupe' function with remove duplicates from an array
-
-
 
 # htype() takes a string which is checked to see if it is a valid hostname or hostname template, or why it's invalid
 htype () {
@@ -953,6 +1019,10 @@ do
         out DEBUG "Found --validate"
 
 # Now we'll get the rest of the options, validating as we go
+
+    elif [ "${switch:0:10}" == "--defaults" ]; then
+        # If specified already handled. Need it here to pass validation.
+        pass=1
 
     elif [ "${switch:0:2}" == "-c" ]; then
         fnd_comment=1

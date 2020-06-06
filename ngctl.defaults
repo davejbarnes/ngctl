@@ -1,0 +1,23 @@
+# Location of the LiveStatus query socket
+env_livestatus='/var/spool/nagios/cmd/live'
+
+# Location of the Nagios command socket
+env_cmdpipe='/var/log/nagios/rw/nagios.cmd'
+
+# Regex to match valid hostname prefixes
+env_server_prefix_regex='prod|dr|fake'
+
+# Location of query mode configuration file
+ngq_filename='/etc/nagios/ngctlq.conf'
+
+# the time to pause after sending a command before trying to validate it's success
+ng_sleepz=0.5
+
+# time to pause between sending commands
+ng_sleepZ=0.1
+
+# number of times to retry a command
+ng_retry=5
+
+# number of times to validate a command before retrying the command
+ng_validation_retry=3
