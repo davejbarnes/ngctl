@@ -510,26 +510,40 @@ func_time=0             # used by datefunc() to return it's value
 hostgroup_hosts=''      # used by getHostsbyhostgroup() to set the list of hostnames
 
 
+load_config() {
+    allowed_vars="env_livestatus env_cmdpipe env_server_prefix_regex ngq_filename ng_sleepz ng_sleepZ ng_retry ng_validation_retry"
+    for i in $allowed_vars; do
+        cvar=$(grep ^$i= $1)
+        if [ $? -eq 0 ]; then
+            out DEBUG "Setting value $i from $1 ($cvar)"
+            eval $cvar
+        fi
+    done
+}
+
 # SETTING_DEFAULTS
 # Now check if a 'defaults' file is specified
 # This can be used to override one or more of the defaults defined
 # above. Use with caution as changing some will have weird effects.
 # If it isn't in the provided ngctl.defaults it's probably a bad idea.
 
-# First check for /etc/ngctl.defaults and load it if it's there
-if [ -r /etc/ngctl.defaults ]; then
-    out DEBUG "Loading file /etc/ngctl.defaults - if it breaks don't blame ngctl!"
-    source /etc/ngctl.defaults
-else
-    out DEBUG "Defaults file /etc/ngctl.defaults doesn't exist or is not accessible"
-fi
+# Precedence of ngctl.defaults: local directory first, then /etc/ngctl.defaults,
+# then a specified file. Last set wins.
 
-# Now check for ./ngctl.defaults and load it if it's there
+# First check for ./ngctl.defaults and load it if it's there
 if [ -r ./ngctl.defaults ]; then
     out DEBUG "Loading file ./ngctl.defaults - if it breaks don't blame ngctl!"
-    source ./ngctl.defaults
+    load_config ./ngctl.defaults
 else
     out DEBUG "Defaults file ./ngctl.defaults doesn't exist or is not accessible"
+fi
+
+# Next check for /etc/ngctl.defaults and load it if it's there
+if [ -r /etc/ngctl.defaults ]; then
+    out DEBUG "Loading file /etc/ngctl.defaults - if it breaks don't blame ngctl!"
+    load_config /etc/ngctl.defaults
+else
+    out DEBUG "Defaults file /etc/ngctl.defaults doesn't exist or is not accessible"
 fi
 
 # Finally check if another defaults file has been specified
@@ -553,7 +567,7 @@ done
 if [ $flg_defaults -eq 1 ]; then
     if [ -r $ng_defaults ]; then
         out DEBUG "Loading specified file $ng_defaults - if it breaks don't blame ngctl!"
-        source $ng_defaults
+        load_config $ng_defaults
     else
         # If the file doesn't exist, exit immediately - unexpected results on the Nagios
         # instance might occur if overrides were not loaded as expected.
