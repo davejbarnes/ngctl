@@ -1,24 +1,20 @@
 README
 
-ngctl was born out of a need to quickly and easily set a downtime on an alerting host without having to navigate a web interface.  That morphed into a bigger project to allow setting more specific downtime entries such as a specific service on a specific host, and maybe for a specific time in the future.
-
-Over time this grew to also supporting acknowledging problems, and enabling or disabling checks and notifications.
-It now supports querying Nagios via a predefined set of queries in a configuration file (ngctlq.conf) and also removing downtime entries by ID or by using some or all of the paramaters used to add the downtime entry.
-
-It's always a work in progress, but it does work.
-
+ngctl is a Bash script for interacting with Nagios and MK Live Status
+It allows easy scripting of various BAU operations, such as scheduling a 'downtime'
+or acknowledging one or more problems, etc.
 
 Prerequisites:
     The Nagios instance must also have Livestatus installed
     The user running the command needs r/w access to both the Nagios command socket and the Livestatus pipe
-        ** The locations of the sock and pipe must be specified in the script **
+        * see below for --defaults and note for configuring the correct locations
     Normally included dependancies: grep, printf, sed, and unixcat (from Livestatus)
 
 
 Use
 
 ngctl currently works in several modes
- * down             add a host or service downtime
+ * down (default)   add a host or service downtime
  * up               remove a host or service downtime
  * rd               remove a host or service downtime by ID
  * ack              acknowledge host or service problems
@@ -27,7 +23,7 @@ ngctl currently works in several modes
  * dc               Disable host or service checks
  * ec               Enable host or service checks
  * sc               Schedule host or service check
- * query            Uses the ngctlq.conf file to query Nagios via Livestatus
+ * query            Query Nagios via Livestatus (see below for details)
 
  Use:   ngctl <mode> options parameters
  (if mode is not specified, 'down' is the default)
@@ -133,6 +129,9 @@ Not all parameters require a value.
 --my        my downtimes entries
             in 'up' mode find only current user's entries
 
+--defaults  override default settings
+            a string, a custom filename to override default settings
+
 --config    override query config filename
             a string, a custom filename to override default ngctlq.conf file
 
@@ -166,6 +165,12 @@ Not all parameters require a value.
 --validate  validate query config file
             validtaes that the specified ngctlq.conf file is valid
 
+Note:
+    Default settings are, in order of least precedence:
+        defined in the script
+        defined as a local ngctl.defaults file
+        defined as a file at /etc/ngctl.defaults
+        defined by a file specified by --defaults=
 
 
 Specifying hostnames
