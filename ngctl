@@ -532,7 +532,7 @@ load_config() {
 
 # First check for ./ngctl.defaults and load it if it's there
 if [ -r ./ngctl.defaults ]; then
-    out DEBUG "Loading file ./ngctl.defaults - if it breaks don't blame ngctl!"
+    out DEBUG "Loading local file ./ngctl.defaults - if it breaks don't blame ngctl!"
     load_config ./ngctl.defaults
 else
     out DEBUG "Defaults file ./ngctl.defaults doesn't exist or is not accessible"
@@ -540,7 +540,7 @@ fi
 
 # Next check for /etc/ngctl.defaults and load it if it's there
 if [ -r /etc/ngctl.defaults ]; then
-    out DEBUG "Loading file /etc/ngctl.defaults - if it breaks don't blame ngctl!"
+    out DEBUG "Loading system file /etc/ngctl.defaults - if it breaks don't blame ngctl!"
     load_config /etc/ngctl.defaults
 else
     out DEBUG "Defaults file /etc/ngctl.defaults doesn't exist or is not accessible"
