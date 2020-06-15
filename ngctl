@@ -2377,7 +2377,7 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
                                         fi
                                         flg_command_success=1
                                     else
-                                        echo -e $lql_result
+                                        echo -e $lql_post_result
                                         flg_command_success=1
                                     fi
                                 else
@@ -2393,22 +2393,34 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
                                 if [ $flg_all -eq 1 ]; then
                                     # Can't validate when scheduling ALL checks on a host, so just pass
                                     flg_command_success=1
-                                    printf "$back"
-                                    out info "OK: Can't validate when scheduling ALL checks on host(s)\n"
+                                    if [ $flg_quiet -eq 0 ]; then
+                                        printf "$back"
+                                        out info "OK: Can't validate when scheduling ALL checks on host(s)\n"
+                                    else
+                                        echo -e "OK"
+                                    fi
                                 elif [ $flg_force -eq 1 ]; then
                                     # --force can be used when specifying a date/time so validation
                                     # of next check time doesn't make sense
                                     flg_command_success=1
                                     datefunc unix $lql_post_result
-                                    printf "$back"
-                                    out info "OK: Next check time is $func_time\n"
+                                    if [ $flg_quiet -eq 0 ]; then
+                                        printf "$back"
+                                        out info "OK: Next check time is $func_time\n"
+                                    else
+                                        echo -e "$func_time"
+                                    fi
                                 else
                                     # You would think that -gt would make more sense here. race But condition.
                                     if [ $ng_next_check -ne $lql_post_result ]; then
                                         flg_command_success=1
                                         datefunc unix $lql_post_result
-                                        printf "$back"
-                                        out ok "Success - new check time is $func_time\n"
+                                        if [ $flg_quiet -eq 0 ]; then
+                                            printf "$back"
+                                            out ok "Success - new check time is $func_time\n"
+                                        else
+                                            echo -e "$func_time"
+                                        fi
                                     else
                                         if [ $flg_quiet -eq 0 ]; then printf "." ; back="$back\b"; fi    # Bit of a hack for now
                                         cmd_validate_tries=$(( $cmd_validate_tries + 1 ))
