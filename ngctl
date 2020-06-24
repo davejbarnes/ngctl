@@ -1881,7 +1881,7 @@ if [ $ng_mode = down ] || [ $ng_mode = up ] || [ $ng_mode = scheck ]; then
                 ;;
     esac
 
-    if [ $ng_mode = scheck ]; then
+    if [ $ng_mode = scheck ] && [ "$ng_begintime" != "" ]; then
         datefunc absolute "$ng_begintime"
         if [ $? -eq 0 ]; then 
             cmd_starttime=$func_time
@@ -2089,20 +2089,6 @@ if [ $ng_mode != down ] && [ $ng_mode != up ] && [ $ng_mode != query ] && [ $ng_
     fi
 fi
 
-# in scheck mode, only an offset or absolute begin time is vaild
-if [ $ng_mode = scheck ]; then
-    if [ $errchk_times -eq 1 ] || [ $errchk_times -eq 2 ] || [ $errchk_times -eq 3 ] || [ $errchk_times -eq 4 ]; then
-        out debug "Time checks for scheck mode OK"
-    elif [ $errchk_times -eq 0 ]; then
-        out debug "Scheduling check for 10 seconds in the future"
-        cmd_starttime=$(date -d "10 seconds" +%s)
-    else
-        out debug "Time checks for scheck mode FAILED"
-        flg_error=1
-        ng_error=$(echo -e "$ng_error\n\tOnly begin time or durations (as an offset from now) is valid for $ng_mode mode")
-    fi
-fi
-
 if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "up" ]; then  
                 # this should cover all use cases (send and validate a command) 
                 # except query, rmdown and up modes which are handled seperately
@@ -2176,7 +2162,24 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
             flg_error=1
             ng_error="$ng_error\n\tCan't use --all when specifying services"
         fi
+
+        # in scheck mode, only an offset or absolute begin time is vaild
+        if [ $errchk_times -eq 2 ] || [ $errchk_times -eq 3 ] || [ $errchk_times -eq 1 ]; then
+            out debug "Scheduling check for end time"
+            cmd_schecktime=$cmd_endtime
+        elif [ $errchk_times -eq 0 ]; then
+            out DEBUG "Scheduling check for 10 seconds in the future"
+            cmd_schecktime=$(date -d "10 seconds" +%s)
+        elif [ $errchk_times -eq 4 ]; then
+            out DEBUG "Scheduling check for begin time"
+            cmd_schecktime=$cmd_starttime
+        else
+            out debug "Time checks for scheck mode FAILED"
+            flg_error=1
+            ng_error=$(echo -e "$ng_error\n\tOnly begin time or durations (as an offset from now) is valid for $ng_mode mode")
+        fi
     fi
+
     if [ $ng_mode != scheck ]; then
         noScheckParams
     fi
@@ -2302,11 +2305,11 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
             elif [ $ng_mode == scheck ]; then
 
                 if [ $flg_service -eq 1 ]; then
-                    ls_command="COMMAND [$(date +%s)] $scheck_service_command;$targethost;$service;$cmd_starttime\n"
+                    ls_command="COMMAND [$(date +%s)] $scheck_service_command;$targethost;$service;$cmd_schecktime\n"
                     lql_pre_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nColumns: host_name\n"
                     lql_post_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nColumns: next_check\n"
                 else
-                    ls_command="COMMAND [$(date +%s)] $scheck_host_command;$targethost;$cmd_starttime\n"
+                    ls_command="COMMAND [$(date +%s)] $scheck_host_command;$targethost;$cmd_schecktime\n"
                     lql_pre_query="GET hosts\nFilter: name = $targethost\nColumns: name\n"
                     lql_post_query="GET hosts\nFilter: name = $targethost\nColumns: next_check\n"
                 fi
