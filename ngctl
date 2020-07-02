@@ -2345,7 +2345,7 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
                         if [ $flg_force -eq 0 ]; then
                             ng_next_check=$(echo -e "$lql_post_query" | unixcat $env_livestatus)
                             out DEBUG "Next check current value: $ng_next_check"
-                            if [ $cmd_endtime -gt $ng_next_check ]; then
+                            if [ $cmd_schecktime -gt $ng_next_check ]; then
                                 flg_command_success=1
                                 datefunc unix $ng_next_check
                                 out ok "Sooner check already scheduled for: $func_time\n"
