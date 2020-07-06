@@ -1881,7 +1881,7 @@ if [ $ng_mode = down ] || [ $ng_mode = up ] || [ $ng_mode = scheck ]; then
                 ;;
     esac
 
-    if [ $ng_mode = scheck ]; then
+    if [ $ng_mode = scheck ] && [ "$ng_begintime" != "" ]; then
         datefunc absolute "$ng_begintime"
         if [ $? -eq 0 ]; then 
             cmd_starttime=$func_time
@@ -2089,20 +2089,6 @@ if [ $ng_mode != down ] && [ $ng_mode != up ] && [ $ng_mode != query ] && [ $ng_
     fi
 fi
 
-# in scheck mode, only an offset or absolute begin time is vaild
-if [ $ng_mode = scheck ]; then
-    if [ $errchk_times -eq 1 ] || [ $errchk_times -eq 2 ] || [ $errchk_times -eq 3 ] || [ $errchk_times -eq 4 ]; then
-        out debug "Time checks for scheck mode OK"
-    elif [ $errchk_times -eq 0 ]; then
-        out debug "Scheduling check for 10 seconds in the future"
-        cmd_starttime=$(date -d "10 seconds" +%s)
-    else
-        out debug "Time checks for scheck mode FAILED"
-        flg_error=1
-        ng_error=$(echo -e "$ng_error\n\tOnly begin time or durations (as an offset from now) is valid for $ng_mode mode")
-    fi
-fi
-
 if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "up" ]; then  
                 # this should cover all use cases (send and validate a command) 
                 # except query, rmdown and up modes which are handled seperately
@@ -2176,7 +2162,24 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
             flg_error=1
             ng_error="$ng_error\n\tCan't use --all when specifying services"
         fi
+
+        # in scheck mode, only an offset or absolute begin time is vaild
+        if [ $errchk_times -eq 2 ] || [ $errchk_times -eq 3 ] || [ $errchk_times -eq 1 ]; then
+            out debug "Scheduling check for end time"
+            cmd_schecktime=$cmd_endtime
+        elif [ $errchk_times -eq 0 ]; then
+            out DEBUG "Scheduling check for 10 seconds in the future"
+            cmd_schecktime=$(date -d "10 seconds" +%s)
+        elif [ $errchk_times -eq 4 ]; then
+            out DEBUG "Scheduling check for begin time"
+            cmd_schecktime=$cmd_starttime
+        else
+            out debug "Time checks for scheck mode FAILED"
+            flg_error=1
+            ng_error=$(echo -e "$ng_error\n\tOnly begin time or durations (as an offset from now) is valid for $ng_mode mode")
+        fi
     fi
+
     if [ $ng_mode != scheck ]; then
         noScheckParams
     fi
@@ -2302,11 +2305,11 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
             elif [ $ng_mode == scheck ]; then
 
                 if [ $flg_service -eq 1 ]; then
-                    ls_command="COMMAND [$(date +%s)] $scheck_service_command;$targethost;$service;$cmd_starttime\n"
+                    ls_command="COMMAND [$(date +%s)] $scheck_service_command;$targethost;$service;$cmd_schecktime\n"
                     lql_pre_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nColumns: host_name\n"
                     lql_post_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nColumns: next_check\n"
                 else
-                    ls_command="COMMAND [$(date +%s)] $scheck_host_command;$targethost;$cmd_starttime\n"
+                    ls_command="COMMAND [$(date +%s)] $scheck_host_command;$targethost;$cmd_schecktime\n"
                     lql_pre_query="GET hosts\nFilter: name = $targethost\nColumns: name\n"
                     lql_post_query="GET hosts\nFilter: name = $targethost\nColumns: next_check\n"
                 fi
@@ -2342,7 +2345,7 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
                         if [ $flg_force -eq 0 ]; then
                             ng_next_check=$(echo -e "$lql_post_query" | unixcat $env_livestatus)
                             out DEBUG "Next check current value: $ng_next_check"
-                            if [ $cmd_endtime -gt $ng_next_check ]; then
+                            if [ $cmd_schecktime -gt $ng_next_check ]; then
                                 flg_command_success=1
                                 datefunc unix $ng_next_check
                                 out ok "Sooner check already scheduled for: $func_time\n"
@@ -2377,7 +2380,7 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
                                         fi
                                         flg_command_success=1
                                     else
-                                        echo -e $lql_result
+                                        echo -e $lql_post_result
                                         flg_command_success=1
                                     fi
                                 else
@@ -2393,22 +2396,34 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
                                 if [ $flg_all -eq 1 ]; then
                                     # Can't validate when scheduling ALL checks on a host, so just pass
                                     flg_command_success=1
-                                    printf "$back"
-                                    out info "OK: Can't validate when scheduling ALL checks on host(s)\n"
+                                    if [ $flg_quiet -eq 0 ]; then
+                                        printf "$back"
+                                        out info "OK: Can't validate when scheduling ALL checks on host(s)\n"
+                                    else
+                                        echo -e "OK"
+                                    fi
                                 elif [ $flg_force -eq 1 ]; then
                                     # --force can be used when specifying a date/time so validation
                                     # of next check time doesn't make sense
                                     flg_command_success=1
                                     datefunc unix $lql_post_result
-                                    printf "$back"
-                                    out info "OK: Next check time is $func_time\n"
+                                    if [ $flg_quiet -eq 0 ]; then
+                                        printf "$back"
+                                        out info "OK: Next check time is $func_time\n"
+                                    else
+                                        echo -e "$func_time"
+                                    fi
                                 else
                                     # You would think that -gt would make more sense here. race But condition.
                                     if [ $ng_next_check -ne $lql_post_result ]; then
                                         flg_command_success=1
                                         datefunc unix $lql_post_result
-                                        printf "$back"
-                                        out ok "Success - new check time is $func_time\n"
+                                        if [ $flg_quiet -eq 0 ]; then
+                                            printf "$back"
+                                            out ok "Success - new check time is $func_time\n"
+                                        else
+                                            echo -e "$func_time"
+                                        fi
                                     else
                                         if [ $flg_quiet -eq 0 ]; then printf "." ; back="$back\b"; fi    # Bit of a hack for now
                                         cmd_validate_tries=$(( $cmd_validate_tries + 1 ))
