@@ -1890,6 +1890,18 @@ if [ $ng_mode = down ] || [ $ng_mode = up ] || [ $ng_mode = scheck ]; then
         fi
     fi
 
+    if [ $ng_mode = down ] || [ $ng_mode = scheck ]; then
+        datefunc now
+        if [ $? -eq 0 ]; then
+            now_time=$func_time
+        else
+            out ERR "Something has gone horribly wrong"; exit 1
+        fi
+        if [ $cmd_starttime -lt $now_time ]; then
+            out ERR "Start time is in the past"; exit 1
+        fi
+    fi
+
     out debug "Start: $cmd_starttime   End: $cmd_endtime"
     datefunc unix $cmd_starttime
     out debug "Start: $func_time"
@@ -2178,12 +2190,12 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
             flg_error=1
             ng_error=$(echo -e "$ng_error\n\tOnly begin time or durations (as an offset from now) is valid for $ng_mode mode")
         fi
+        out DEBUG "Finished error checking in SC mode"
     fi
 
     if [ $ng_mode != scheck ]; then
         noScheckParams
     fi
-    out DEBUG "Finished error checking in SC mode"
 
     # If generic errors or specific errors were found, report them and exit
     if [ $flg_error -eq 1 ]; then out err "$ng_error"; exit 1; fi
