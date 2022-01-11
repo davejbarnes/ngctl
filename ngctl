@@ -894,13 +894,13 @@ removeDowntime(){
 
     while [ $flg_command_success -eq 0 ]  && [ $cmd_dt_tries -le $cmd_retries ];
     do
-        ls_command="COMMAND [$(date +%s)] DEL_HOST_DOWNTIME;$ng_dt_id"
+        ls_command="[%lu] DEL_HOST_DOWNTIME;$ng_dt_id"
         out DEBUG sending: $ls_command
-        echo -e "$ls_command" $(date +%s) > $env_cmdpipe
+        printf "$ls_command" $(date +%s) > $env_cmdpipe
 
-        ls_command="COMMAND [$(date +%s)] DEL_SVC_DOWNTIME;$ng_dt_id"
+        ls_command="[%lu] DEL_SVC_DOWNTIME;$ng_dt_id"
         out DEBUG sending: $ls_command
-        echo -e "$ls_command" $(date +%s) > $env_cmdpipe
+        printf "$ls_command" $(date +%s) > $env_cmdpipe
     
         # pause, then query to see if dt still exists
         sleep $ng_sleepZ
@@ -2245,11 +2245,11 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
             if [ $ng_mode == down ]; then
 
                 if [ $flg_service -eq 1 ]; then
-                    ls_command="COMMAND [$(date +%s)] SCHEDULE_SVC_DOWNTIME;$targethost;$service;$cmd_starttime;$cmd_endtime;1;0;0;$cmd_user;$cmd_comment\n"
+                    ls_command="[%lu] SCHEDULE_SVC_DOWNTIME;$targethost;$service;$cmd_starttime;$cmd_endtime;1;0;0;$cmd_user;$cmd_comment\n"
                     lql_pre_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nColumns: host_name\n"
                     lql_post_query="GET downtimes\nFilter: author = $cmd_user\nFilter: host_name = $targethost\nFilter: end_time = $cmd_endtime\nFilter: start_time = $cmd_starttime\nFilter: service_description = $service\nColumns: id\n"
                 else
-                    ls_command="COMMAND [$(date +%s)] SCHEDULE_HOST_DOWNTIME;$targethost;$cmd_starttime;$cmd_endtime;1;0;0;$cmd_user;$cmd_comment\n"
+                    ls_command="[%lu] SCHEDULE_HOST_DOWNTIME;$targethost;$cmd_starttime;$cmd_endtime;1;0;0;$cmd_user;$cmd_comment\n"
                     lql_pre_query="GET hosts\nFilter: name = $targethost\nColumns: name\n"
                     lql_post_query="GET downtimes\nFilter: author = $cmd_user\nFilter: host_name = $targethost\nFilter: end_time = $cmd_endtime\nFilter: start_time = $cmd_starttime\nColumns: id\n"
                 fi
@@ -2257,11 +2257,11 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
             elif [ $ng_mode == ack ]; then
 
                 if [ $flg_service -eq 1 ]; then
-                    ls_command="COMMAND [$(date +%s)] ACKNOWLEDGE_SVC_PROBLEM;$targethost;$service;$cmd_sticky;$cmd_notify;$cmd_persistent;$cmd_user;$cmd_comment\n"
+                    ls_command="[%lu] ACKNOWLEDGE_SVC_PROBLEM;$targethost;$service;$cmd_sticky;$cmd_notify;$cmd_persistent;$cmd_user;$cmd_comment\n"
                     lql_pre_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nFilter: state >= 1\nColumns: host_name\n"
                     lql_post_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nFilter: state >= 1\nFilter: acknowledged = 1\nColumns: acknowledgement_type\n"
                 else
-                    ls_command="COMMAND [$(date +%s)] ACKNOWLEDGE_HOST_PROBLEM;$targethost;$cmd_sticky;$cmd_notify;$cmd_persistent;$cmd_user;$cmd_comment\n"
+                    ls_command="[%lu] ACKNOWLEDGE_HOST_PROBLEM;$targethost;$cmd_sticky;$cmd_notify;$cmd_persistent;$cmd_user;$cmd_comment\n"
                     lql_pre_query="GET hosts\nFilter: name = $targethost\nFilter: state >= 1\nColumns: name\n"
                     lql_post_query="GET hosts\nFilter: name = $targethost\nFilter: state >= 1\nFilter: acknowledged = 1\nColumns: acknowledgement_type\n"
                 fi
@@ -2269,11 +2269,11 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
             elif [ $ng_mode == discheck ]; then
 
                 if [ $flg_service -eq 1 ]; then
-                    ls_command="COMMAND [$(date +%s)] DISABLE_SVC_CHECK;$targethost;$service\n"
+                    ls_command="[%lu] DISABLE_SVC_CHECK;$targethost;$service\n"
                     lql_pre_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nColumns: host_name\n"
                     lql_post_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nFilter: checks_enabled = 0\nColumns: checks_enabled\n"
                 else
-                    ls_command="COMMAND [$(date +%s)] DISABLE_HOST_CHECK;$targethost\n"
+                    ls_command="[%lu] DISABLE_HOST_CHECK;$targethost\n"
                     lql_pre_query="GET hosts\nFilter: name = $targethost\nColumns: name\n"
                     lql_post_query="GET hosts\nFilter: name = $targethost\nFilter: state >= 1\nFilter: checks_enabled = 0\nColumns: checks_enabled\n"
                 fi
@@ -2281,11 +2281,11 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
             elif [ $ng_mode == encheck ]; then
 
                 if [ $flg_service -eq 1 ]; then
-                    ls_command="COMMAND [$(date +%s)] ENABLE_SVC_CHECK;$targethost;$service\n"
+                    ls_command="[%lu] ENABLE_SVC_CHECK;$targethost;$service\n"
                     lql_pre_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nColumns: host_name\n"
                     lql_post_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nFilter: checks_enabled = 1\nColumns: checks_enabled\n"
                 else
-                    ls_command="COMMAND [$(date +%s)] ENABLE_HOST_CHECK;$targethost\n"
+                    ls_command="[%lu] ENABLE_HOST_CHECK;$targethost\n"
                     lql_pre_query="GET hosts\nFilter: name = $targethost\nColumns: name\n"
                     lql_post_query="GET hosts\nFilter: name = $targethost\nFilter: state >= 1\nFilter: checks_enabled = 1\nColumns: checks_enabled\n"
                 fi
@@ -2293,11 +2293,11 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
             elif [ $ng_mode == disnotif ]; then
 
                 if [ $flg_service -eq 1 ]; then
-                    ls_command="COMMAND [$(date +%s)] DISABLE_SVC_NOTIFICATIONS;$targethost;$service\n"
+                    ls_command="[%lu] DISABLE_SVC_NOTIFICATIONS;$targethost;$service\n"
                     lql_pre_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nColumns: host_name\n"
                     lql_post_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nFilter: notifications_enabled = 0\nColumns: notifications_enabled\n"
                 else
-                    ls_command="COMMAND [$(date +%s)] DISABLE_HOST_NOTIFICATIONS;$targethost\n"
+                    ls_command="[%lu] DISABLE_HOST_NOTIFICATIONS;$targethost\n"
                     lql_pre_query="GET hosts\nFilter: name = $targethost\nColumns: name\n"
                     lql_post_query="GET hosts\nFilter: name = $targethost\nFilter: state >= 1\nFilter: notifications_enabled = 0\nColumns: notifications_enabled\n"
                 fi
@@ -2305,11 +2305,11 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
             elif [ $ng_mode == ennotif ]; then
 
                 if [ $flg_service -eq 1 ]; then
-                    ls_command="COMMAND [$(date +%s)] ENABLE_SVC_NOTIFICATIONS;$targethost;$service\n"
+                    ls_command="[%lu] ENABLE_SVC_NOTIFICATIONS;$targethost;$service\n"
                     lql_pre_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nColumns: host_name\n"
                     lql_post_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nFilter: notifications_enabled = 1\nColumns: notifications_enabled\n"
                 else
-                    ls_command="COMMAND [$(date +%s)] ENABLE_HOST_NOTIFICATIONS;$targethost\n"
+                    ls_command="[%lu] ENABLE_HOST_NOTIFICATIONS;$targethost\n"
                     lql_pre_query="GET hosts\nFilter: name = $targethost\nColumns: name\n"
                     lql_post_query="GET hosts\nFilter: name = $targethost\nFilter: state >= 1\nFilter: notifications_enabled = 1\nColumns: notifications_enabled\n"
                 fi
@@ -2317,11 +2317,11 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
             elif [ $ng_mode == scheck ]; then
 
                 if [ $flg_service -eq 1 ]; then
-                    ls_command="COMMAND [$(date +%s)] $scheck_service_command;$targethost;$service;$cmd_schecktime\n"
+                    ls_command="[%lu] $scheck_service_command;$targethost;$service;$cmd_schecktime\n"
                     lql_pre_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nColumns: host_name\n"
                     lql_post_query="GET services\nFilter: host_name = $targethost\nFilter: description = $service\nColumns: next_check\n"
                 else
-                    ls_command="COMMAND [$(date +%s)] $scheck_host_command;$targethost;$cmd_schecktime\n"
+                    ls_command="[%lu] $scheck_host_command;$targethost;$cmd_schecktime\n"
                     lql_pre_query="GET hosts\nFilter: name = $targethost\nColumns: name\n"
                     lql_post_query="GET hosts\nFilter: name = $targethost\nColumns: next_check\n"
                 fi
@@ -2370,7 +2370,7 @@ if [ "$ng_mode" != "query" ] && [ "$ng_mode" != "rmdown" ] && [ "$ng_mode" != "u
                     while [ $flg_command_success -eq 0 ]  && [ $cmd_dt_tries -le $cmd_retries ];
                     do
                         out DEBUG "Sending command to $env_cmdpipe, try $cmd_dt_tries"
-                        echo -e "$ls_command" $(date +%s) > $env_cmdpipe
+                        printf "$ls_command" $(date +%s) > $env_cmdpipe
                         if [ $flg_quiet -eq 0 ]; then printf "*" ; back="$back\b"; fi    # Bit of a hack for now
                         sleep $ng_sleepZ
                         while [ $flg_command_success -eq 0 ]  && [ $cmd_validate_tries -le $cmd_validate_retries ];
