@@ -894,11 +894,11 @@ removeDowntime(){
 
     while [ $flg_command_success -eq 0 ]  && [ $cmd_dt_tries -le $cmd_retries ];
     do
-        ls_command="[%lu] DEL_HOST_DOWNTIME;$ng_dt_id"
+        ls_command="[%lu] DEL_HOST_DOWNTIME;$ng_dt_id\n"
         out DEBUG sending: $ls_command
         printf "$ls_command" $(date +%s) > $env_cmdpipe
 
-        ls_command="[%lu] DEL_SVC_DOWNTIME;$ng_dt_id"
+        ls_command="[%lu] DEL_SVC_DOWNTIME;$ng_dt_id\n"
         out DEBUG sending: $ls_command
         printf "$ls_command" $(date +%s) > $env_cmdpipe
     
