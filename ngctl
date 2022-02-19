@@ -126,6 +126,36 @@ out (){
     esac
 }
 
+# IMPORTANT - newline characters should not be allowed at all in the parameters
+badParmaetersCheck(){
+  out debug "Starting bad parameter check"
+  originalParams="$@"
+#   echo Original params = $originalParams
+  fatalParams=0
+  checkedSpecial=${originalParams//[$'\n\t\r']}
+  if [ "$originalParams" != "$checkedSpecial" ]; then
+    out DEBUG "Found bad special characters"
+    out ERR "Tab, new-line and carridge returns are not permitted"
+    fatalParams=1
+  fi
+   specialChars=('\\n' '\\t' '\\r')
+  checkChars=$originalParams
+  for char in ${specialChars[@]}; do
+    checkChars=${checkChars/$char/ }
+  done
+  if [ "$originalParams" != "$checkChars" ]; then
+    out DEBUG "Found bad escaped special characters"
+    out ERR "Escaped tab, new-line and carridge returns are not permitted"
+    fatalParams=1
+  fi
+  if [ $fatalParams -eq 1 ]; then
+    out debug "Finished bad parameter check"
+    exit 21
+  fi
+  out debug "Finished bad parameter check"
+}
+badParmaetersCheck "$@"
+
 case "$1" in 
     down)
         ng_mode=down
